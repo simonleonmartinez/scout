@@ -62,6 +62,8 @@ Assets/**/*.SpectaclesMobileKitModule !filter !diff !merge text eol=lf linguist-
 Packages/**/*.SpectaclesMobileKitModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.aiPack !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Packages/**/*.aiPack !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
+Assets/**/*.anchorModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
+Packages/**/*.anchorModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.animationAsset !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Packages/**/*.animationAsset !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.animationCurveTrack !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
@@ -106,6 +108,8 @@ Assets/**/*.connectedLensModule !filter !diff !merge text eol=lf linguist-langua
 Packages/**/*.connectedLensModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.coreMLModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Packages/**/*.coreMLModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
+Assets/**/*.customAsset !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
+Packages/**/*.customAsset !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.deepLinkModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Packages/**/*.deepLinkModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.depthModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
@@ -140,6 +144,8 @@ Assets/**/*.fontCollection !filter !diff !merge text eol=lf linguist-language=ya
 Packages/**/*.fontCollection !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.fontFamily !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Packages/**/*.fontFamily !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
+Assets/**/*.gameControllerModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
+Packages/**/*.gameControllerModule !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.handMesh !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Packages/**/*.handMesh !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge
 Assets/**/*.handTracking3D !filter !diff !merge text eol=lf linguist-language=yaml merge=lens-studio-yaml-merge

@@ -5,6 +5,8 @@
     - !<own> 0005641c-028d-459a-0000-000000014b4d
     - !<own> 8cb3ef9a-58d3-4cf6-b877-38dfe9bea6c8
     - !<own> a7ed2ca6-9ef4-4f3d-95c9-207d0d9620dc
+    - !<own> fb84d0dd-f7e5-48fc-962d-339d5fcae84d
+    - !<own> e87ba2c5-df96-4ffb-b321-fe15b5f51cba
   layers: !<Layers/267ee9a7-aff2-4f9d-9a49-f71214747d03>
     userLayers:
       - id: 1
@@ -165,8 +167,6 @@
   EstimationSharpness: 1.000000
   EnvMapExposure: 1.000000
   EnvMapRotation: 0.000000
-  DiffuseEnvTexture: !<reference> 2013a19b-93c1-4f21-b7ea-876a33550c7b
-  SpecularEnvTexture: !<reference> d795fd46-e16b-4cb9-8dfb-4ef227298f7a
   Color: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
   ShadowColor: {x: 0.000000, y: 0.000000, z: 0.000000, w: 1.000000}
   DynamicEnvInputTexture: !<reference> 00000000-0000-0000-0000-000000000000
@@ -175,6 +175,7 @@
   FalloffType: None
   FalloffRange: .inf
   ShadowType: None
+  SpecularCubemapTexture: !<reference> 054dcb15-b114-7918-5d37-41437206317f
 - !<SceneObject/010e353a-1e10-4970-b759-afc71239f853>
   PrefabRemaps:
     []
@@ -693,16 +694,12 @@
   Enabled: true
   ScriptAsset: !<reference> 08499c3f-2782-44f7-894c-061842825339
   ScriptInputsDefault:
-    title: true
-    noteText: true
     accent: true
     showSharedControls: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
     "":
-      title: scout
-      noteText: Check this angle
       accent: !<Vec4> {x: 0.450000, y: 0.900000, z: 0.950000, w: 1.000000}
       showSharedControls: false
   ScriptTypes:
@@ -1006,6 +1003,22 @@
     - !<own> c7bafc04-b11f-4700-9808-c6d7ccdba90d
   Components:
     []
+- !<ScriptComponent/7993176d-5ff9-4295-be21-79ce76b8f14f>
+  PrefabRemaps:
+    []
+  Name: Script
+  Enabled: true
+  ScriptAsset: !<reference> 00000000-0000-0000-0000-000000000000
+  ScriptInputsDefault:
+    {}
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      {}
+  ScriptTypes:
+    "":
+      {}
 - !<SceneObject/7d11ba42-964e-42ee-b1f5-1716ff5637a3>
   PrefabRemaps:
     []
@@ -1936,6 +1949,22 @@
     - !<own> 0618c123-b927-4aa4-8207-bc43b71f5afd
   Components:
     - !<own> 8c782239-1769-4009-916d-76391944b43f
+- !<ScriptComponent/bd5f01c5-5b4d-41be-9ff9-77edf03ae192>
+  PrefabRemaps:
+    []
+  Name: Script
+  Enabled: true
+  ScriptAsset: !<reference> 00000000-0000-0000-0000-000000000000
+  ScriptInputsDefault:
+    {}
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      {}
+  ScriptTypes:
+    "":
+      {}
 - !<SceneObject/bd966e17-6eb2-40f5-9531-f3fd68bef4bd>
   PrefabRemaps:
     []
@@ -2468,6 +2497,21 @@
     - !<own> 2423b95d-a3d8-489f-b72e-67827202cfc2
   Components:
     []
+- !<SceneObject/e87ba2c5-df96-4ffb-b321-fe15b5f51cba>
+  PrefabRemaps:
+    []
+  Name: AiPreviewAgent Handler
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 7993176d-5ff9-4295-be21-79ce76b8f14f
 - !<SceneObject/f0cfd393-915b-485d-b03f-2a644810c06c>
   PrefabRemaps:
     []
@@ -2659,6 +2703,21 @@
   ScriptTypes:
     "":
       {}
+- !<SceneObject/fb84d0dd-f7e5-48fc-962d-339d5fcae84d>
+  PrefabRemaps:
+    []
+  Name: AiPreviewAgent Handler
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> bd5f01c5-5b4d-41be-9ff9-77edf03ae192
 - !<SceneObject/fbeb58cf-6c7d-42f6-80b9-4f69494e51f9>
   PrefabRemaps:
     []
