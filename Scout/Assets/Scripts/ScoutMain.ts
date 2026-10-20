@@ -403,7 +403,8 @@ export class ScoutMain extends BaseScriptComponent {
     // one angle rather than falling off near the stand — but it's the only combination that actually
     // shows both illumination and a cast shadow on a subject.
     light.lightType=LightType.Directional;
-    light.shadowType=ShadowType.ShadowMap;
+    // Shadows are handed out by assignLightShadows (one caster per scene), not per light.
+    light.shadowType=ShadowType.None;
     const glowVisual=this.buildGlowDisc(model);
     const ref:LightMarkerRef={light,glowVisual};
     this.applyLightLook(ref,state);
@@ -511,6 +512,19 @@ export class ScoutMain extends BaseScriptComponent {
   private refresh():void {
     // Only clear the gizmo when its target was actually removed; never auto-show it for a fresh placement.
     if(this.editing&&this.placed.indexOf(this.editing)<0){this.editing=null;this.gizmo?.select(null);}
+    this.assignLightShadows();
     this.palette.setState(this.selected,this.placed.length);
+  }
+  /** Lens Studio renders shadows from only one directional light per scene, and each shadow map is an
+   * extra full render pass — real GPU/battery cost on Specs. So only the oldest remaining Light casts
+   * shadows; the others still light the scene. Re-run on every placement change so deleting the caster
+   * hands shadows to the next Light. */
+  private assignLightShadows():void {
+    let hasCaster=false;
+    this.lightRefs.forEach(ref=>{
+      if(!ref)return;
+      ref.light.shadowType=hasCaster?ShadowType.None:ShadowType.ShadowMap;
+      hasCaster=true;
+    });
   }
 }
