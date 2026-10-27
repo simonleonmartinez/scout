@@ -12,6 +12,7 @@ import {HandInputData} from "SpectaclesInteractionKit.lspkg/Providers/HandInputD
 import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
 import {CameraAssetState, LightAssetState, NoteAssetState, defaultCameraState, defaultLightState, defaultNoteState, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
 import {HOVER_GLOW} from "./ScoutHover";
+import {ScoutFloorSetup} from "./ScoutFloorSetup";
 
 type PointerRay={start:vec3;dir:vec3};
 /** The exact runtime hooks one placed Light asset needs so its dials can affect something real. */
@@ -141,6 +142,7 @@ export class ScoutMain extends BaseScriptComponent {
   private placed:SceneObject[]=[];
   private previewShape:SceneObject;
   private previewGroundY:number=null;
+  private previewPoint:vec3=null;
   private groundIndicator:SceneObject;
   private groundIndicatorImage:Image;
   private interactors:Interactor[]=[];
@@ -150,8 +152,12 @@ export class ScoutMain extends BaseScriptComponent {
   private ready=false;
   private pinched=[false,false];
   private hitSession:HitTestSession;
-  // Lowest flat surface seen at floor distance below the head — nothing placed may sink beneath it.
+  // The floor nothing placed may sink beneath: confirmed by the user in floor setup (then locked), or —
+  // if they skipped it — the lowest flat surface seen a plausible distance below the head.
   private floorY:number=null;
+  private floorLocked=false;
+  private floorSetup:ScoutFloorSetup;
+  private paletteShown=true;
   private previewHitTime=-100;
   private pending:{kind:number;ray:PointerRay;aim:vec3;started:number}=null;
   private spinner:SceneObject;
@@ -193,8 +199,12 @@ export class ScoutMain extends BaseScriptComponent {
     this.buildGroundIndicator();
     this.buildPlacementFeedback();
     this.buildHoverHalo();
+    this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>{
+      this.floorY=y;this.floorLocked=true;this.placeAudio.play(1);
+      console.log("Scout floor set at "+y.toFixed(1));
+    });
     this.rebuildPreview();this.refresh();this.ready=true;
-    console.log("Scout ready: choose equipment, notes, or actors; pinch empty space to place.");
+    console.log("Scout ready: point at the floor to set it, then choose equipment, notes, or actors.");
   }
   private audio(track:AudioTrackAsset):AudioComponent {
     const audio=this.sceneObject.createComponent("Component.AudioComponent") as AudioComponent;
@@ -259,9 +269,20 @@ export class ScoutMain extends BaseScriptComponent {
     const aim=this.positionFor(active);
     this.surfaceHitTest(ray,aim,point=>{
       if(!point)return;
-      this.previewGroundY=point.y;this.previewHitTime=getTime();
+      this.previewGroundY=point.y;this.previewPoint=point;this.previewHitTime=getTime();
       this.noteSurface(point.y);
     });
+    // First run: nothing can be placed (and the palette stays hidden) until the floor is set.
+    const settingUp=!this.floorSetup.done;
+    if(this.paletteShown===settingUp){this.paletteShown=!settingUp;this.palette.sceneObject.enabled=!settingUp;}
+    const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
+    this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
+    if(settingUp){
+      this.placementPreview.enabled=false;
+      this.updateGroundIndicator(false,aim);
+      this.updatePlacementFeedback(false,ray,aim);
+      return;
+    }
     // No fresh hit under the cursor: fall back to the known floor, never to the midair aim height.
     const surfaceY=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewGroundY:this.floorY;
     // Hits only arrive a few times a second, so the spot itself is recomputed every frame as where the
@@ -284,10 +305,14 @@ export class ScoutMain extends BaseScriptComponent {
   private isFlat(result:WorldQueryHitTestResult):boolean {
     return !!result&&result.normal.y>FLAT_NORMAL_Y;
   }
-  /** Tracks the real floor as the lowest flat surface seen a plausible distance below the user's head. */
-  private noteSurface(y:number):void {
+  /** Whether a surface is a plausible distance below the user's head to be the floor. */
+  private isFloorHeight(y:number):boolean {
     const head=this.camera.getTransform().getWorldPosition().y;
-    if(y>head-FLOOR_MIN_DROP||y<head-FLOOR_MAX_DROP)return;
+    return y<=head-FLOOR_MIN_DROP&&y>=head-FLOOR_MAX_DROP;
+  }
+  /** Without a confirmed floor, tracks it as the lowest flat surface seen at floor height. */
+  private noteSurface(y:number):void {
+    if(this.floorLocked||!this.isFloorHeight(y))return;
     if(this.floorY===null||y<this.floorY)this.floorY=y;
   }
   /** World Y of a marker's lowest point, measured from its actual mesh so it's right whatever pivot the
@@ -514,6 +539,10 @@ export class ScoutMain extends BaseScriptComponent {
     return cam.getWorldPosition().add(cam.forward.uniformScale(-this.placementDistance));
   }
   private placeAt(interactor?:Interactor):void {
+    if(!this.floorSetup.done){
+      if(this.floorSetup.canSkip){this.lastAction=getTime();this.floorSetup.skip();}
+      return;
+    }
     if(this.placed.length>=this.maxMarkers){this.palette.setHint("Marker limit reached — Undo or Clear All");return}
     if(this.pending)return;
     this.lastAction=getTime();
