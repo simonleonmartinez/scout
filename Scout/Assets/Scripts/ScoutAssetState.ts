@@ -43,7 +43,10 @@ export function kelvinToRGB(kelvin:number):vec3 {
 
 /** Note Asset state — the shot this waypoint pin annotates. `step` drives which page of the wizard is
  * showing (0=Write note? button, 1=shot number, 2=shot type, 3=movement, 4=done/summary); the other
- * fields hold what's been picked so far. Every placed Note gets its own instance, same as Camera/Light. */
+ * fields hold what's been picked so far. Every placed Note gets its own instance, same as Camera/Light.
+ * On a photo shoot the same fields hold the photo lists below: there's no shot number (photos have no
+ * running order, so step 1 is skipped), shotType indexes PHOTO_SHOT_TYPE_STEPS and movementType indexes
+ * PHOTO_ANGLE_STEPS. */
 export type NoteAssetState={step:0|1|2|3|4;shotNumber:number;shotType:number|null;movementType:number|null};
 export function defaultNoteState():NoteAssetState {
   return {step:0,shotNumber:1,shotType:null,movementType:null};
@@ -55,6 +58,20 @@ export const SHOT_TYPE_STEPS:IconStep[]=[
   {label:"Mid Shot",icon:requireAsset("../Icons/frame_person.png") as Texture},
   {label:"Long Shot",icon:requireAsset("../Icons/landscape.png") as Texture},
   {label:"Establishing",icon:requireAsset("../Icons/panorama.png") as Texture},
+];
+export const PHOTO_SHOT_TYPE_STEPS:IconStep[]=[
+  {label:"Headshot",icon:requireAsset("../Icons/face.png") as Texture},
+  {label:"Half Body",icon:requireAsset("../Icons/frame_person.png") as Texture},
+  {label:"Full Body",icon:requireAsset("../Icons/person.png") as Texture},
+  {label:"Environmental",icon:requireAsset("../Icons/landscape.png") as Texture},
+  {label:"Detail",icon:requireAsset("../Icons/zoom_in.png") as Texture},
+  {label:"Flat Lay",icon:requireAsset("../Icons/grid_view.png") as Texture},
+];
+export const PHOTO_ANGLE_STEPS:IconStep[]=[
+  {label:"Eye Level",icon:requireAsset("../Icons/visibility.png") as Texture},
+  {label:"High Angle",icon:requireAsset("../Icons/south.png") as Texture},
+  {label:"Low Angle",icon:requireAsset("../Icons/north.png") as Texture},
+  {label:"Dutch Tilt",icon:requireAsset("../Icons/rotate_right.png") as Texture},
 ];
 export const MOVEMENT_STEPS:IconStep[]=[
   {label:"Pan",icon:requireAsset("../Icons/swap_horiz.png") as Texture},

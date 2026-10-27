@@ -682,7 +682,7 @@ export class ScoutMain extends BaseScriptComponent {
     // the pin rather than just above a ground-level card, like every other asset's label/dial row does.
     const labelY=kind===2?NOTE_PIN_HEIGHT:height/2+8;
     if(noteState){
-      this.palette.buildNoteWizard(root,label,labelY,noteState,patch=>Object.assign(noteState,patch),()=>this.editMarker(root),()=>this.deleteMarker(root));
+      this.palette.buildNoteWizard(root,label,labelY,noteState,patch=>Object.assign(noteState,patch),()=>this.editMarker(root),()=>this.deleteMarker(root),this.shootType==="photo");
     }else{
       this.palette.decorateMarker(root,label,labelY,()=>this.editMarker(root),()=>this.deleteMarker(root),kind===0?1:kind===1?2:0);
     }

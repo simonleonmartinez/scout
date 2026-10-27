@@ -3,7 +3,7 @@ import {addBackPlateHover} from "./ScoutHover";
 import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
 import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
 import {addBox} from "./ScoutMarkerMesh";
-import {NoteAssetState, SHOT_TYPE_STEPS, MOVEMENT_STEPS} from "./ScoutAssetState";
+import {NoteAssetState, SHOT_TYPE_STEPS, MOVEMENT_STEPS, PHOTO_SHOT_TYPE_STEPS, PHOTO_ANGLE_STEPS} from "./ScoutAssetState";
 
 const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
 const EDIT_ICON=requireAsset("../Icons/edit.png") as Texture;
@@ -40,7 +40,7 @@ const SPIRAL_RING=new vec4(0.52,0.49,0.58,1);
 export class ScoutNoteWizard {
   readonly root:SceneObject;
   private contentHost:SceneObject;
-  constructor(parent:SceneObject,pos:vec3,private material:Material,private theme:NoteWizardTheme,label:string,private state:NoteAssetState,private onChange:(patch:Partial<NoteAssetState>)=>void,onEdit:()=>void,onDelete:()=>void,private scheduleDelay:(seconds:number,fn:()=>void)=>void){
+  constructor(parent:SceneObject,pos:vec3,private material:Material,private theme:NoteWizardTheme,label:string,private state:NoteAssetState,private onChange:(patch:Partial<NoteAssetState>)=>void,onEdit:()=>void,onDelete:()=>void,private scheduleDelay:(seconds:number,fn:()=>void)=>void,private photo=false){
     this.root=this.obj(parent,"Note wizard",new vec3(pos.x,pos.y,4));
     this.root.createComponent("Component.Canvas");
     const back=this.root.createComponent(BackPlate.getTypeName()) as BackPlate;
@@ -83,10 +83,13 @@ export class ScoutNoteWizard {
   }
   private rebuild():void {
     for(let i=this.contentHost.getChildrenCount()-1;i>=0;i--)this.contentHost.getChild(i).destroy();
+    // Photo shoots: no shot number (no running order), photo shot types, and camera angle instead of
+    // camera movement.
+    const shotTypes=this.photo?PHOTO_SHOT_TYPE_STEPS:SHOT_TYPE_STEPS;
     if(this.state.step===0)this.buildStepWrite();
-    else if(this.state.step===1)this.buildStepNumberGrid();
-    else if(this.state.step===2)this.buildStepChoices("Shot Type",SHOT_TYPE_STEPS,i=>this.commit({shotType:i,step:3}));
-    else if(this.state.step===3)this.buildStepChoices("Movement",MOVEMENT_STEPS,i=>this.commit({movementType:i,step:4}));
+    else if(this.state.step===1&&!this.photo)this.buildStepNumberGrid();
+    else if(this.state.step<=2)this.buildStepChoices("Shot Type",shotTypes,i=>this.commit({shotType:i,step:3}));
+    else if(this.state.step===3)this.buildStepChoices(this.photo?"Angle":"Movement",this.photo?PHOTO_ANGLE_STEPS:MOVEMENT_STEPS,i=>this.commit({movementType:i,step:4}));
     else this.buildSummary();
     // Step content is rebuilt from scratch on every transition, so the defensive collider sweep (stray
     // BackPlate colliders would otherwise sit in front of a button and block it) must re-run each time
@@ -114,7 +117,7 @@ export class ScoutNoteWizard {
     back.onInitialized.add(()=>{
       this.style(back,this.theme.idleColor,3);
       back.interactionPlane.enabled=false;
-      back.interactable.onTriggerEnd.add(()=>this.commit({step:1}));
+      back.interactable.onTriggerEnd.add(()=>this.commit({step:this.firstStep()}));
       addBackPlateHover(back,btn,this.theme.idleColor);
     });
     this.text(btn,"Write note?",new vec3(0,0,0.3),PANEL_W-28,17,this.theme.textColor,124);
@@ -178,21 +181,30 @@ export class ScoutNoteWizard {
   /** After the last step: a compact read-only summary, matching how every other asset ends up with a
    * static label once its settings are set. */
   private buildSummary():void {
-    const type=this.state.shotType!==null?SHOT_TYPE_STEPS[this.state.shotType].label:"?";
-    const move=this.state.movementType!==null?MOVEMENT_STEPS[this.state.movementType].label:"?";
-    this.text(this.contentHost,"Shot "+this.state.shotNumber,new vec3(0,17,0.2),PANEL_W-15,18,this.theme.accent,145);
-    this.text(this.contentHost,type+" · "+move,new vec3(0,0,0.2),PANEL_W-15,11,this.theme.textColor,92);
+    const types=this.photo?PHOTO_SHOT_TYPE_STEPS:SHOT_TYPE_STEPS,moves=this.photo?PHOTO_ANGLE_STEPS:MOVEMENT_STEPS;
+    const type=this.state.shotType!==null?types[this.state.shotType]?.label??"?":"?";
+    const move=this.state.movementType!==null?moves[this.state.movementType]?.label??"?":"?";
+    if(this.photo){
+      // No shot number on a photo shoot — the shot type leads instead.
+      this.text(this.contentHost,type,new vec3(0,17,0.2),PANEL_W-15,18,this.theme.accent,130);
+      this.text(this.contentHost,move,new vec3(0,0,0.2),PANEL_W-15,11,this.theme.textColor,92);
+    }else{
+      this.text(this.contentHost,"Shot "+this.state.shotNumber,new vec3(0,17,0.2),PANEL_W-15,18,this.theme.accent,145);
+      this.text(this.contentHost,type+" · "+move,new vec3(0,0,0.2),PANEL_W-15,11,this.theme.textColor,92);
+    }
     const redo=this.obj(this.contentHost,"Redo",new vec3(0,-19,0.1));
     const back=redo.createComponent(BackPlate.getTypeName()) as BackPlate;
     back.style="simple";back.size=new vec2(30,12);
     back.onInitialized.add(()=>{
       this.style(back,this.theme.idleColor,2);
       back.interactionPlane.enabled=false;
-      back.interactable.onTriggerEnd.add(()=>this.commit({step:1}));
+      back.interactable.onTriggerEnd.add(()=>this.commit({step:this.firstStep()}));
       addBackPlateHover(back,redo,this.theme.idleColor);
     });
     this.text(redo,"Edit",new vec3(0,0,0.3),26,8,this.theme.textColor,72);
   }
+  /** Where "Write note?" / "Edit" start: the shot number on a video shoot, the shot type on a photo shoot. */
+  private firstStep():1|2 {return this.photo?2:1;}
   private iconBadge(parent:SceneObject,name:string,pos:vec3,icon:Texture,tint:vec4,onTap:()=>void):void {
     const so=this.obj(parent,name,pos);
     const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;

@@ -389,12 +389,12 @@ export class ScoutPaletteUI extends BaseScriptComponent {
    * baked into ScoutNoteWizard itself), anchored near the top of the waypoint pin so it's readable at
    * eye level the instant the pin is placed. `scheduleDelay` hands the wizard this component's own
    * createEvent access, since ScoutNoteWizard is a plain class, not a component. */
-  buildNoteWizard(root:SceneObject,label:string,labelY:number,state:NoteAssetState,onChange:(patch:Partial<NoteAssetState>)=>void,onEdit:()=>void,onDelete:()=>void):void {
+  buildNoteWizard(root:SceneObject,label:string,labelY:number,state:NoteAssetState,onChange:(patch:Partial<NoteAssetState>)=>void,onEdit:()=>void,onDelete:()=>void,photo=false):void {
     if(!this.badgeMaterial)return;
     const theme:NoteWizardTheme={font:THEME_FONT,textColor:NOTE_TEXT_TINT,accent:NOTE_ACCENT_TINT,idleColor:NOTE_IDLE_TINT,hoverColor:NOTE_HOVER_TINT,activeColor:NOTE_ACTIVE_TINT,panelColor:NOTE_PAPER_TINT};
     new ScoutNoteWizard(root,new vec3(0,labelY,0),this.badgeMaterial,theme,label,state,onChange,onEdit,onDelete,(seconds,fn)=>{
       const ev=this.createEvent("DelayedCallbackEvent");ev.bind(fn);ev.reset(seconds);
-    });
+    },photo);
   }
   /** Compact ISO/Aperture/Shutter/WB dial row for one placed Camera asset — purely informational, no
    * dial here drives a real effect (see AGENTS request: only the Light asset's dials do). */

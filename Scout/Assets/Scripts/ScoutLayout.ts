@@ -13,7 +13,7 @@ export function parseLayout(raw:string):ScoutLayout {
     const c=m.cameraState,l=m.lightState,n=m.noteState;
     if(c!==undefined&&(m.kind!==0||!c||!index(c.isoIndex,7)||!index(c.apertureIndex,9)||!index(c.shutterIndex,18)||!index(c.kelvinIndex,11)))throw new Error('Invalid camera settings');
     if(l!==undefined&&(m.kind!==1||!l||!index(l.intensityIndex,20)||!index(l.kelvinIndex,11)))throw new Error('Invalid light settings');
-    if(n!==undefined&&(m.kind!==2||!n||!index(n.step,4)||!index(n.shotNumber,10)||n.shotNumber<1||(n.shotType!==null&&!index(n.shotType,3))||(n.movementType!==null&&!index(n.movementType,5))))throw new Error('Invalid note settings');
+    if(n!==undefined&&(m.kind!==2||!n||!index(n.step,4)||!index(n.shotNumber,10)||n.shotNumber<1||(n.shotType!==null&&!index(n.shotType,5))||(n.movementType!==null&&!index(n.movementType,5))))throw new Error('Invalid note settings');
     const norm=m.rotation.reduce((sum:number,x:number)=>sum+x*x,0);
     if(Math.abs(norm-1)>.02)throw new Error('Invalid orientation');
   }
