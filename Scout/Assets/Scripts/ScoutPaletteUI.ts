@@ -13,6 +13,7 @@ import {CameraAssetState, LightAssetState, NoteAssetState, ISO_STOPS, APERTURE_S
 const ICONS: Texture[] = [requireAsset("../Icons/videocam.png") as Texture, requireAsset("../Icons/lightbulb.png") as Texture, requireAsset("../Icons/sticky_note_2.png") as Texture, requireAsset("../Icons/undo.png") as Texture, requireAsset("../Icons/delete.png") as Texture];
 const ACTOR_ICONS:Texture[]=[requireAsset("../Icons/person.png") as Texture,requireAsset("../Icons/chair.png") as Texture];
 const HAND_ICON=requireAsset("../Icons/pan_tool.png") as Texture;
+const RESET_FLOOR_ICON=requireAsset("../Icons/restart_alt.png") as Texture;
 const ARROW_ICON=requireAsset("../Icons/keyboard_arrow_down.png") as Texture;
 const EDIT_ICON=requireAsset("../Icons/edit.png") as Texture;
 const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
@@ -74,6 +75,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
 
   onUndo = new Event<void>();
   onClear = new Event<void>();
+  onResetFloor = new Event<void>();
   onConnect = new Event<void>();
   onInvite = new Event<void>();
   onSave = new Event<void>();
@@ -107,7 +109,8 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const back = this.sceneObject.createComponent(BackPlate.getTypeName()) as BackPlate;
     this.back=back;
     back.style="simple";
-    const height=(this.showSharedControls?50:42)+LOGO_HEIGHT;
+    // +5.5 for the Reset Floor row (4.5 tall + the column's 1cm gap).
+    const height=(this.showSharedControls?50:42)+LOGO_HEIGHT+5.5;
     this.expandedSize=new vec2(46,height);
     back.size = this.expandedSize;
     back.onInitialized.add(()=>{this.style(back,PANEL_TINT,PANEL_RADIUS);});
@@ -136,6 +139,9 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const actionRow = this.flex(actions,FlexDirection.Row,42,4.5,1,0);
     this.button(actionRow,"Undo Last",20.5,4.5,ICONS[3],()=>this.onUndo.invoke());
     this.button(actionRow,"Clear All",20.5,4.5,ICONS[4],()=>this.onClear.invoke());
+    const floor=this.child(col,"Floor",42,4.5);
+    const floorRow=this.flex(floor,FlexDirection.Row,42,4.5,1,0);
+    this.button(floorRow,"Reset Floor",42,4.5,RESET_FLOOR_ICON,()=>this.onResetFloor.invoke());
     if(this.showSharedControls){
     const shared=this.child(col,"Shared layout",42,4.5);
     const sharedRow=this.flex(shared,FlexDirection.Row,42,4.5,.6,0);

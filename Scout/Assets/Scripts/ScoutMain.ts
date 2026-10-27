@@ -199,10 +199,8 @@ export class ScoutMain extends BaseScriptComponent {
     this.buildGroundIndicator();
     this.buildPlacementFeedback();
     this.buildHoverHalo();
-    this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>{
-      this.floorY=y;this.floorLocked=true;this.placeAudio.play(1);
-      console.log("Scout floor set at "+y.toFixed(1));
-    });
+    this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>this.confirmFloor(y));
+    this.palette.onResetFloor.add(()=>this.resetFloor());
     this.rebuildPreview();this.refresh();this.ready=true;
     console.log("Scout ready: point at the floor to set it, then choose equipment, notes, or actors.");
   }
@@ -304,6 +302,27 @@ export class ScoutMain extends BaseScriptComponent {
   }
   private isFlat(result:WorldQueryHitTestResult):boolean {
     return !!result&&result.normal.y>FLAT_NORMAL_Y;
+  }
+  private confirmFloor(y:number):void {
+    // On a reset, markers that were standing on the old floor move to the new one with it, so a floor
+    // that was set wrong doesn't leave everything floating or buried.
+    const old=this.floorY;
+    if(old!==null)this.placed.forEach((root,i)=>{
+      if(isNull(root)||Math.abs(this.bottomOf(root)-old)>3)return;
+      this.liftOnto(root,y);this.groundY[i]=y;
+    });
+    this.floorY=y;this.floorLocked=true;this.placeAudio.play(1);
+    console.log("Scout floor set at "+y.toFixed(1));
+  }
+  /** Menu → Reset Floor: back to floor setup; placement pauses until it's confirmed again. */
+  private resetFloor():void {
+    this.lastAction=getTime();
+    this.pending=null;
+    // The old floor stays locked until the new one is confirmed (or setup is skipped, which keeps it),
+    // so markers standing on it can be recognised and moved across in confirmFloor.
+    this.gizmo.select(null);this.editing=null;
+    this.floorSetup.restart();
+    this.selectAudio.play(1);
   }
   /** Whether a surface is a plausible distance below the user's head to be the floor. */
   private isFloorHeight(y:number):boolean {

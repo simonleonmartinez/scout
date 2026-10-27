@@ -50,6 +50,11 @@ export class ScoutFloorSetup {
     this.text=t;
     this.ring.enabled=false;
   }
+  /** Runs setup again from the start (menu → Reset Floor). */
+  restart():void {
+    this.anchor=null;this.progress=0;this.started=null;this.confirmedAt=null;this.skipped=false;
+    this.ring.enabled=false;
+  }
   /** Pinch-to-skip: placement falls back to automatic floor detection. */
   skip():void {this.skipped=true;this.ring.enabled=false;this.label.enabled=false;}
 
