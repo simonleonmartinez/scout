@@ -17,9 +17,10 @@ const HAND_ICON=requireAsset("../Icons/pan_tool.png") as Texture;
 const RESET_FLOOR_ICON=requireAsset("../Icons/restart_alt.png") as Texture;
 const LAYOUTS_ICON=requireAsset("../Icons/bookmarks.png") as Texture;
 const MOODBOARD_ICON=requireAsset("../Icons/photo_library.png") as Texture;
+const MIC_ICON=requireAsset("../Icons/mic.png") as Texture;
 // Room for MAX_SAVED_LAYOUTS rows of 5 plus 1cm gaps.
 const LAYOUT_ROW_H=5,LAYOUT_LIST_H=6*LAYOUT_ROW_H+5;
-const LAYOUT_NAME_MAX=18;
+const LAYOUT_NAME_MAX=16;
 // No 0/O or 1/I, so a code read off the glasses can't be mistyped on a phone.
 const PAIRING_ALPHABET="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ARROW_ICON=requireAsset("../Icons/keyboard_arrow_down.png") as Texture;
@@ -87,6 +88,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   onSaveLayout = new Event<void>();
   onLoadLayout = new Event<string>();
   onRenameLayout = new Event<string>();
+  onVoiceRenameLayout = new Event<string>();
   onDeleteLayout = new Event<string>();
   onPinPoster = new Event<void>();
   onConnect = new Event<void>();
@@ -112,6 +114,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   private layoutList:SceneObject;
   private layouts:SavedLayoutInfo[]=[];
   private layoutListRefresh:DelayedCallbackEvent;
+  private shootType:"photo"|"video"=null;
   private manualCollapsed=true;
   private forcedCollapsed=false;
   get isCollapsed():boolean { return this.collapsed; }
@@ -241,7 +244,9 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       const host=this.child(list,"Layout "+info.id,42,LAYOUT_ROW_H);
       const row=this.flex(host,FlexDirection.Row,42,LAYOUT_ROW_H,1,0);
       const name=info.name.length>LAYOUT_NAME_MAX?info.name.slice(0,LAYOUT_NAME_MAX-1)+"…":info.name;
-      this.button(row,name+"  ·  "+info.count,30,LAYOUT_ROW_H,null,()=>this.onLoadLayout.invoke(info.id));
+      this.button(row,name+"  ·  "+info.count,24,LAYOUT_ROW_H,null,()=>this.onLoadLayout.invoke(info.id));
+      // Two ways to name a layout: say it (mic) or type it (Specs keyboard).
+      this.button(row,"",5,LAYOUT_ROW_H,MIC_ICON,()=>this.onVoiceRenameLayout.invoke(info.id));
       this.button(row,"",5,LAYOUT_ROW_H,EDIT_ICON,()=>this.onRenameLayout.invoke(info.id));
       this.button(row,"",5,LAYOUT_ROW_H,CLOSE_ICON,()=>this.onDeleteLayout.invoke(info.id));
     });
@@ -326,9 +331,11 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   }
   setState(selected:number,count:number): void {
     this.selected=selected; this.count=count;
-    if (this.status) this.status.text=TOOL_NAMES[selected]+" ready  ·  "+count+" placed";
+    const shoot=this.shootType==="photo"?"Photo shoot  ·  ":this.shootType==="video"?"Video shoot  ·  ":"";
+    if (this.status) this.status.text=shoot+TOOL_NAMES[selected]+" ready  ·  "+count+" placed";
     this.selectionLabels.forEach((label,i)=> {label.text=(i===selected?"• ":"")+TOOL_NAMES[i]});
   }
+  setShootType(type:"photo"|"video"):void { this.shootType=type; this.setState(this.selected,this.count); }
   setSharedStatus(text:string):void {if(this.sharedStatus)this.sharedStatus.text=text;}
   setHint(hint:string):void { if(this.status) this.status.text=hint; }
 

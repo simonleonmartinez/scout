@@ -30,19 +30,26 @@
   ScriptInputsHidden:
     camera: false
     cameraPrefab: false
+    cinemaCameraPrefab: false
+    clapperboardPrefab: false
     cloudStorageModule: false
     connectedLensModule: false
     debugColliders: false
+    filmReelPrefab: false
+    gimbalPrefab: false
+    lensPrefab: false
     lightPrefab: false
     markerMaterial: false
     markers: false
     maxMarkers: false
     palette: false
+    photoCameraPrefab: false
     placementDistance: false
     placementPreview: false
     seatedPrefab: false
     sfxVolume: false
     standingPrefab: false
+    workbenchPrefab: false
   ScriptTypesHidden:
     {}
   ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
@@ -67,6 +74,13 @@
       lightPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       standingPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       seatedPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      workbenchPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      cinemaCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      gimbalPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      lensPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      clapperboardPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      filmReelPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      photoCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     -
       {}
@@ -86,3 +100,10 @@
     - // @input Asset.ObjectPrefab lightPrefab
     - // @input Asset.ObjectPrefab standingPrefab
     - // @input Asset.ObjectPrefab seatedPrefab
+    - // @input Asset.ObjectPrefab workbenchPrefab
+    - // @input Asset.ObjectPrefab cinemaCameraPrefab
+    - // @input Asset.ObjectPrefab gimbalPrefab
+    - // @input Asset.ObjectPrefab lensPrefab
+    - // @input Asset.ObjectPrefab clapperboardPrefab
+    - // @input Asset.ObjectPrefab filmReelPrefab
+    - // @input Asset.ObjectPrefab photoCameraPrefab

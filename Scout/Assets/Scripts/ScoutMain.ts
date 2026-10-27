@@ -15,13 +15,14 @@ import {HOVER_GLOW} from "./ScoutHover";
 import {ScoutFloorSetup} from "./ScoutFloorSetup";
 import {ScoutLayoutStore,MAX_SAVED_LAYOUTS} from "./ScoutLayoutStore";
 import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
+import {ScoutWorkbench,ShootType} from "./ScoutWorkbench";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
  * facing direction), h is height above the floor, r is yaw relative to the user's. */
 type SavedMarker={k:number;l:string;x:number;z:number;h:number;r:number;c?:CameraAssetState;li?:LightAssetState;n?:NoteAssetState};
 type SavedPoster={x:number;z:number;h:number;r:number};
-type SavedLayout={v:2;m:SavedMarker[];p:SavedPoster[]};
+type SavedLayout={v:2;m:SavedMarker[];p:SavedPoster[];s?:ShootType};
 type UserFrame={origin:vec3;yaw:number};
 /** The exact runtime hooks one placed Light asset needs so its dials can affect something real. */
 type LightMarkerRef={light:LightSource;glowVisual:RenderMeshVisual};
@@ -69,6 +70,8 @@ const HINT_COLOR=new vec4(0.75,1,0.8,1);
 const HINT_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 const HOVER_HALO=requireAsset("../Icons/hover_glow.png") as Texture;
 const HOVER_HALO_ALPHA=0.55,HOVER_HALO_EASE=12;
+// Voice naming: how long a pause ends the name, and a cap in case nothing is ever said.
+const VOICE_SILENCE_MS=1500,VOICE_TIMEOUT=10,VOICE_NAME_MAX=40;
 const GROUND_INDICATOR=requireAsset("../Icons/ground_indicator.png") as Texture;
 const GROUND_INDICATOR_COLOR=new vec4(0.72,0.58,1,1);
 const GROUND_INDICATOR_FOOTPRINTS=[80,80,26,65,65]; // Camera, Light, Note, Standing, Seated — matches marker collider footprints
@@ -132,6 +135,14 @@ export class ScoutMain extends BaseScriptComponent {
   @input @allowUndefined lightPrefab:ObjectPrefab;
   @input @allowUndefined standingPrefab:ObjectPrefab;
   @input @allowUndefined seatedPrefab:ObjectPrefab;
+  // Onboarding workbench gear (generated models); any left empty is simply skipped.
+  @input @allowUndefined workbenchPrefab:ObjectPrefab;
+  @input @allowUndefined cinemaCameraPrefab:ObjectPrefab;
+  @input @allowUndefined gimbalPrefab:ObjectPrefab;
+  @input @allowUndefined lensPrefab:ObjectPrefab;
+  @input @allowUndefined clapperboardPrefab:ObjectPrefab;
+  @input @allowUndefined filmReelPrefab:ObjectPrefab;
+  @input @allowUndefined photoCameraPrefab:ObjectPrefab;
   private shared:ScoutSharedSession;
   private kinds:number[]=[];
   private groundY:number[]=[]; // real-surface Y each marker stands on (its lowest point, not its root)
@@ -184,6 +195,12 @@ export class ScoutMain extends BaseScriptComponent {
   private pinningPoster=false;
   private posterGhost:SceneObject;
   private wallHit:{position:vec3;normal:vec3;time:number}=null;
+  // Saved layout currently being named by voice, and what's been heard so far.
+  private listening:{id:string;started:number;heard:string}=null;
+  // Onboarding: after the floor is set, the "What are you planning?" bench picks a photo or video shoot.
+  private workbench:ScoutWorkbench;
+  private workbenchShown=false;
+  private shootType:ShootType=null;
 
   onAwake():void {
     this.createEvent("OnStartEvent").bind(()=>this.start());
@@ -217,11 +234,16 @@ export class ScoutMain extends BaseScriptComponent {
     this.buildHoverHalo();
     this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>this.confirmFloor(y));
     this.palette.onResetFloor.add(()=>this.resetFloor());
+    this.workbench=new ScoutWorkbench(this.markerMaterial,this.camera,{
+      bench:this.workbenchPrefab,cinemaCamera:this.cinemaCameraPrefab,gimbal:this.gimbalPrefab,lens:this.lensPrefab,
+      clapperboard:this.clapperboardPrefab,filmReel:this.filmReelPrefab,photoCamera:this.photoCameraPrefab,
+    },type=>this.chooseShoot(type));
     this.layouts=new ScoutLayoutStore();
     this.palette.setLayouts(this.layouts.list());
     this.palette.onSaveLayout.add(()=>this.saveLayout());
     this.palette.onLoadLayout.add(id=>this.loadLayout(id));
     this.palette.onRenameLayout.add(id=>this.renameLayout(id));
+    this.palette.onVoiceRenameLayout.add(id=>this.voiceRenameLayout(id));
     this.palette.onDeleteLayout.add(id=>{this.lastAction=getTime();this.layouts.remove(id);this.palette.setLayouts(this.layouts.list());this.selectAudio.play(1);});
     this.posterGhost=buildPoster(this.markerMaterial,true);this.posterGhost.enabled=false;
     this.palette.onPinPoster.add(()=>{this.lastAction=getTime();this.pending=null;this.pinningPoster=true;this.wallHit=null;});
@@ -294,8 +316,13 @@ export class ScoutMain extends BaseScriptComponent {
       this.previewGroundY=point.y;this.previewPoint=point;this.previewHitTime=getTime();
       this.noteSurface(point.y);
     });
-    // First run: nothing can be placed (and the palette stays hidden) until the floor is set.
-    const settingUp=!this.floorSetup.done;
+    // First run: nothing can be placed (and the palette stays hidden) until the floor is set and a shoot
+    // type is picked at the workbench.
+    if(this.floorSetup.done&&this.shootType===null&&!this.workbenchShown){
+      this.workbenchShown=true;
+      this.workbench.show(this.floorY===null?this.camera.getTransform().getWorldPosition().y-150:this.floorY);
+    }
+    const settingUp=!this.floorSetup.done||this.workbench.active;
     if(this.paletteShown===settingUp){this.paletteShown=!settingUp;this.palette.sceneObject.enabled=!settingUp;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
@@ -323,6 +350,7 @@ export class ScoutMain extends BaseScriptComponent {
   }
   private lateUpdate():void {
     if(!this.ready)return;
+    this.updateListening();
     this.keepAboveFloor();
     this.updateHoverHalo();
   }
@@ -588,6 +616,7 @@ export class ScoutMain extends BaseScriptComponent {
       if(this.floorSetup.canSkip){this.lastAction=getTime();this.floorSetup.skip();}
       return;
     }
+    if(this.workbench.active)return;
     if(this.pinningPoster){this.pinPoster();return}
     if(this.placed.length>=this.maxMarkers){this.palette.setHint("Marker limit reached — Undo or Clear All");return}
     if(this.pending)return;
@@ -800,6 +829,11 @@ export class ScoutMain extends BaseScriptComponent {
     this.cameraStates=[];this.lightStates=[];this.lightRefs=[];this.noteStates=[];
     this.selectAudio.play(1);this.refresh();console.log("Scout cleared");
   }
+  private chooseShoot(type:ShootType):void {
+    this.shootType=type;this.lastAction=getTime();
+    this.palette.setShootType(type);this.placeAudio.play(1);
+    console.log("Scout shoot type: "+type);
+  }
   /** While pinning: a dimmed poster follows the wall under the cursor, or a hint asks for a wall. */
   private updatePosterGhost(ray:PointerRay,aim:vec3):void {
     if(!this.pinningPoster){this.posterGhost.enabled=false;return}
@@ -869,7 +903,7 @@ export class ScoutMain extends BaseScriptComponent {
     const frame=this.userFrame(),floor=frame.origin.y;
     // Millimetres for positions; yaw (radians) needs finer steps — 0.1 rad would be ~6°.
     const round=(n:number)=>Math.round(n*10)/10,roundYaw=(n:number)=>Math.round(n*1000)/1000;
-    const data:SavedLayout={v:2,
+    const data:SavedLayout={v:2,s:this.shootType||undefined,
       m:this.placed.map((root,i)=>{
         const p=this.toFrame(frame,root.getTransform().getWorldPosition());
         return {k:this.kinds[i],l:root.name,x:round(p.x),z:round(p.z),h:round(this.bottomOf(root)-floor),
@@ -896,6 +930,7 @@ export class ScoutMain extends BaseScriptComponent {
       if(data?.v!==2||!Array.isArray(data.m)||!Array.isArray(data.p))throw new Error("unsupported format");
     }catch(e){console.warn("Scout layouts: can't load "+id+" — "+e);this.showHint("That layout couldn't be loaded");return}
     this.clear();
+    if(data.s==="photo"||data.s==="video")this.chooseShoot(data.s);
     const frame=this.userFrame(),floor=frame.origin.y;
     for(const m of data.m.slice(0,this.maxMarkers)){
       if(![0,1,2,3,4].includes(m.k))continue;
@@ -914,6 +949,53 @@ export class ScoutMain extends BaseScriptComponent {
     this.sequence=Math.max(this.sequence,...data.m.map(m=>Number(m.l.match(/(\d+)$/)?.[1])||0));
     this.refresh();this.placeAudio.play(1);
     console.log("Scout loaded layout "+id+" ("+data.m.length+" markers, "+data.p.length+" posters)");
+  }
+  /** Names a saved layout by voice: the name updates live as it's heard and is kept once the user pauses.
+   * Tapping the mic again stops listening. */
+  private voiceRenameLayout(id:string):void {
+    this.lastAction=getTime();
+    const asr=require("LensStudio:AsrModule") as AsrModule;
+    if(this.listening){
+      const same=this.listening.id===id;
+      this.stopListening();
+      if(same)return;
+    }
+    const session={id,started:getTime(),heard:""};
+    this.listening=session;
+    const options=AsrModule.AsrTranscriptionOptions.create();
+    options.silenceUntilTerminationMs=VOICE_SILENCE_MS;
+    options.mode=AsrModule.AsrMode.HighAccuracy;
+    options.onTranscriptionUpdateEvent.add(e=>{
+      if(this.listening!==session)return;
+      const name=this.spokenName(e.text);
+      if(name){session.heard=name;this.layouts.rename(id,name);this.palette.setLayouts(this.layouts.list());}
+      if(e.isFinal&&name){this.stopListening();this.placeAudio.play(1);}
+    });
+    options.onTranscriptionErrorEvent.add(code=>{
+      if(this.listening!==session)return;
+      console.warn("Scout voice naming error "+code);
+      this.stopListening();
+      this.showHint(code===AsrModule.AsrStatusCode.NoInternet?"Voice naming needs internet":"Couldn't hear that — try again");
+    });
+    asr.startTranscribing(options);
+    this.selectAudio.play(1);
+  }
+  private stopListening():void {
+    if(!this.listening)return;
+    this.listening=null;
+    (require("LensStudio:AsrModule") as AsrModule).stopTranscribing();
+  }
+  /** Keeps a "Listening…" prompt (with what's been heard) in view, and gives up after a while. */
+  private updateListening():void {
+    const l=this.listening;
+    if(!l)return;
+    if(getTime()-l.started>VOICE_TIMEOUT){this.stopListening();this.showHint("Didn't catch a name — tap the mic to try again");return}
+    this.showHint(l.heard?"“"+l.heard+"”":"Listening… say the layout's name");
+  }
+  /** Tidies a transcript into a layout name: trimmed, no trailing full stop, capitalised, length-capped. */
+  private spokenName(text:string):string {
+    const t=text.trim().replace(/[.。!?]+$/,"").slice(0,VOICE_NAME_MAX);
+    return t?t.charAt(0).toUpperCase()+t.slice(1):"";
   }
   /** Opens the Specs keyboard to name a saved layout; the name updates as you type. */
   private renameLayout(id:string):void {
