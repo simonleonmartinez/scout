@@ -8,12 +8,20 @@ import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets
 import {ScoutRotaryDial, RotaryDialTheme, DialStep} from "./ScoutRotaryDial";
 import {ScoutNoteWizard, NoteWizardTheme} from "./ScoutNoteWizard";
 import {addBackPlateHover, addHoverFeedback} from "./ScoutHover";
+import type {SavedLayoutInfo} from "./ScoutLayoutStore";
 import {CameraAssetState, LightAssetState, NoteAssetState, ISO_STOPS, APERTURE_STOPS, SHUTTER_STOPS, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
 
 const ICONS: Texture[] = [requireAsset("../Icons/videocam.png") as Texture, requireAsset("../Icons/lightbulb.png") as Texture, requireAsset("../Icons/sticky_note_2.png") as Texture, requireAsset("../Icons/undo.png") as Texture, requireAsset("../Icons/delete.png") as Texture];
 const ACTOR_ICONS:Texture[]=[requireAsset("../Icons/person.png") as Texture,requireAsset("../Icons/chair.png") as Texture];
 const HAND_ICON=requireAsset("../Icons/pan_tool.png") as Texture;
 const RESET_FLOOR_ICON=requireAsset("../Icons/restart_alt.png") as Texture;
+const LAYOUTS_ICON=requireAsset("../Icons/bookmarks.png") as Texture;
+const MOODBOARD_ICON=requireAsset("../Icons/photo_library.png") as Texture;
+// Room for MAX_SAVED_LAYOUTS rows of 5 plus 1cm gaps.
+const LAYOUT_ROW_H=5,LAYOUT_LIST_H=6*LAYOUT_ROW_H+5;
+const LAYOUT_NAME_MAX=18;
+// No 0/O or 1/I, so a code read off the glasses can't be mistyped on a phone.
+const PAIRING_ALPHABET="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ARROW_ICON=requireAsset("../Icons/keyboard_arrow_down.png") as Texture;
 const EDIT_ICON=requireAsset("../Icons/edit.png") as Texture;
 const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
@@ -76,6 +84,11 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   onUndo = new Event<void>();
   onClear = new Event<void>();
   onResetFloor = new Event<void>();
+  onSaveLayout = new Event<void>();
+  onLoadLayout = new Event<string>();
+  onRenameLayout = new Event<string>();
+  onDeleteLayout = new Event<string>();
+  onPinPoster = new Event<void>();
   onConnect = new Event<void>();
   onInvite = new Event<void>();
   onSave = new Event<void>();
@@ -92,6 +105,13 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   private capIcon:Image;
   private expandedSize:vec2;
   private collapsed=false;
+  // Which page of the expanded panel is showing: the main menu, or one of its sub-pages.
+  private view:"main"|"layouts"|"moodboard"="main";
+  private layoutsPanel:SceneObject;
+  private moodboardPanel:SceneObject;
+  private layoutList:SceneObject;
+  private layouts:SavedLayoutInfo[]=[];
+  private layoutListRefresh:DelayedCallbackEvent;
   private manualCollapsed=true;
   private forcedCollapsed=false;
   get isCollapsed():boolean { return this.collapsed; }
@@ -109,8 +129,8 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const back = this.sceneObject.createComponent(BackPlate.getTypeName()) as BackPlate;
     this.back=back;
     back.style="simple";
-    // +5.5 for the Reset Floor row (4.5 tall + the column's 1cm gap).
-    const height=(this.showSharedControls?50:42)+LOGO_HEIGHT+5.5;
+    // +5.5 each for the Reset Floor and Layouts/Moodboard rows (4.5 tall + the column's 1cm gap).
+    const height=(this.showSharedControls?50:42)+LOGO_HEIGHT+11;
     this.expandedSize=new vec2(46,height);
     back.size = this.expandedSize;
     back.onInitialized.add(()=>{this.style(back,PANEL_TINT,PANEL_RADIUS);});
@@ -142,6 +162,10 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const floor=this.child(col,"Floor",42,4.5);
     const floorRow=this.flex(floor,FlexDirection.Row,42,4.5,1,0);
     this.button(floorRow,"Reset Floor",42,4.5,RESET_FLOOR_ICON,()=>this.onResetFloor.invoke());
+    const pages=this.child(col,"Pages",42,4.5);
+    const pagesRow=this.flex(pages,FlexDirection.Row,42,4.5,1,0);
+    this.button(pagesRow,"Saved Layouts",20.5,4.5,LAYOUTS_ICON,()=>this.showView("layouts"));
+    this.button(pagesRow,"Moodboard",20.5,4.5,MOODBOARD_ICON,()=>this.showView("moodboard"));
     if(this.showSharedControls){
     const shared=this.child(col,"Shared layout",42,4.5);
     const sharedRow=this.flex(shared,FlexDirection.Row,42,4.5,.6,0);
@@ -152,6 +176,8 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     this.sharedStatus=this.textRow(col,"Shared layout • connect to begin",42,2,"Caption");
     }
     this.textRow(col,"Tap the pencil on an asset to adjust it",42,2,"Caption");
+    this.layoutsPanel=this.buildLayoutsPanel(content,height);
+    this.moodboardPanel=this.buildMoodboardPanel(content,height);
     this.collapsedBar=this.buildCollapsedBar(content);
     this.buildCap(content);
     this.applyCollapsed();
@@ -165,10 +191,93 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const collapsed=this.manualCollapsed||this.forcedCollapsed;
     if(collapsed===this.collapsed)return;
     this.collapsed=collapsed;
-    this.col.enabled=!collapsed;
+    this.applyView();
     this.collapsedBar.enabled=collapsed;
     this.back.size=collapsed?COLLAPSED_SIZE:this.expandedSize;
     this.updateCap();
+  }
+  private showView(view:"main"|"layouts"|"moodboard"):void {
+    this.view=view;this.applyView();
+    // Safe to rebuild here: the button that opened this page isn't part of the list.
+    if(view==="layouts")this.renderLayoutList();
+  }
+  private applyView():void {
+    this.col.enabled=!this.collapsed&&this.view==="main";
+    this.layoutsPanel.enabled=!this.collapsed&&this.view==="layouts";
+    this.moodboardPanel.enabled=!this.collapsed&&this.view==="moodboard";
+  }
+  /** Saved Layouts page: save the current layout, then load / rename / delete saved ones. */
+  private buildLayoutsPanel(parent:SceneObject,height:number):SceneObject {
+    const panel=this.flex(parent,FlexDirection.Column,46,height,1,2);
+    this.textRow(panel,"Saved Layouts",42,5,"Title2");
+    this.textRow(panel,"Layouts load around where you're standing",42,2,"Caption");
+    const save=this.child(panel,"Save",42,5);
+    const saveRow=this.flex(save,FlexDirection.Row,42,5,1,0);
+    this.button(saveRow,"Save Current Layout",42,5,LAYOUTS_ICON,()=>this.onSaveLayout.invoke());
+    this.layoutList=this.child(panel,"Layout list",42,LAYOUT_LIST_H);
+    this.backRow(panel);
+    this.renderLayoutList();
+    panel.enabled=false;
+    return panel;
+  }
+  /** Refreshes the Saved Layouts list. Rebuilt a frame later: this is usually called from inside one of
+   * the list's own button callbacks, and destroying a button mid-callback isn't safe. */
+  setLayouts(layouts:SavedLayoutInfo[]):void {
+    this.layouts=layouts;
+    if(!this.layoutListRefresh){
+      this.layoutListRefresh=this.createEvent("DelayedCallbackEvent");
+      this.layoutListRefresh.bind(()=>this.renderLayoutList());
+    }
+    this.layoutListRefresh.reset(0);
+  }
+  private renderLayoutList():void {
+    if(!this.layoutList)return;
+    for(let i=this.layoutList.getChildrenCount()-1;i>=0;i--)this.layoutList.getChild(i).destroy();
+    const list=this.flex(this.layoutList,FlexDirection.Column,42,LAYOUT_LIST_H,1,0);
+    const flex=list.getComponent(FlexLayout.getTypeName()) as FlexLayout;
+    flex.onInitialized.add(()=>{flex.justifyContent=FlexJustify.Start;});
+    if(!this.layouts.length){this.textRow(list,"No saved layouts yet",42,3,"Caption");return}
+    this.layouts.forEach(info=>{
+      const host=this.child(list,"Layout "+info.id,42,LAYOUT_ROW_H);
+      const row=this.flex(host,FlexDirection.Row,42,LAYOUT_ROW_H,1,0);
+      const name=info.name.length>LAYOUT_NAME_MAX?info.name.slice(0,LAYOUT_NAME_MAX-1)+"…":info.name;
+      this.button(row,name+"  ·  "+info.count,30,LAYOUT_ROW_H,null,()=>this.onLoadLayout.invoke(info.id));
+      this.button(row,"",5,LAYOUT_ROW_H,EDIT_ICON,()=>this.onRenameLayout.invoke(info.id));
+      this.button(row,"",5,LAYOUT_ROW_H,CLOSE_ICON,()=>this.onDeleteLayout.invoke(info.id));
+    });
+  }
+  /** Moodboard page: phone pairing (shown, not live yet) and pinning a poster to a wall. */
+  private buildMoodboardPanel(parent:SceneObject,height:number):SceneObject {
+    const panel=this.flex(parent,FlexDirection.Column,46,height,1,2);
+    this.textRow(panel,"Moodboard",42,5,"Title2");
+    this.textRow(panel,"Bring in reference images and notes",42,2.5,"Body");
+    this.textRow(panel,"from Google Drive, Canva, Figma or your camera roll",42,2,"Caption");
+    this.textRow(panel,"Open ShotScout Link on your phone and enter",42,2.5,"Caption");
+    const code=this.textRow(panel,this.pairingCode(),42,9,"Title2");
+    code.size=200;code.textFill.color=this.accent;
+    this.textRow(panel,"Not connected · phone pairing coming soon",42,2.5,"Caption");
+    const pin=this.child(panel,"Pin",42,5);
+    const pinRow=this.flex(pin,FlexDirection.Row,42,5,1,0);
+    this.button(pinRow,"Pin a Poster to a Wall",42,5,MOODBOARD_ICON,()=>{
+      this.showView("main");this.setCollapsed(true);this.onPinPoster.invoke();
+    });
+    this.backRow(panel);
+    panel.enabled=false;
+    return panel;
+  }
+  private pairingCode():string {
+    let code="";
+    for(let i=0;i<6;i++)code+=PAIRING_ALPHABET[Math.floor(Math.random()*PAIRING_ALPHABET.length)];
+    return code.slice(0,3)+" "+code.slice(3);
+  }
+  private backRow(panel:SceneObject):void {
+    const back=this.child(panel,"Back",42,4.5);
+    const backRow=this.flex(back,FlexDirection.Row,42,4.5,1,0);
+    this.button(backRow,"Back",42,4.5,null,()=>this.showView("main"));
+  }
+  /** Red × badge for things placed outside the marker system (moodboard posters). */
+  addDeleteBadge(parent:SceneObject,pos:vec3,onDelete:()=>void):void {
+    this.cornerButton(parent,"Delete",pos,CLOSE_ICON,DELETE_SPHERE_TINT,DELETE_ICON_TINT,onDelete);
   }
   /** Vertical row of tool icons — the default collapsed view. Tapping Subject alternates Standing/Seated. */
   private buildCollapsedBar(parent:SceneObject):SceneObject {

@@ -13,8 +13,16 @@ import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets
 import {CameraAssetState, LightAssetState, NoteAssetState, defaultCameraState, defaultLightState, defaultNoteState, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
 import {HOVER_GLOW} from "./ScoutHover";
 import {ScoutFloorSetup} from "./ScoutFloorSetup";
+import {ScoutLayoutStore,MAX_SAVED_LAYOUTS} from "./ScoutLayoutStore";
+import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
 
 type PointerRay={start:vec3;dir:vec3};
+/** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
+ * facing direction), h is height above the floor, r is yaw relative to the user's. */
+type SavedMarker={k:number;l:string;x:number;z:number;h:number;r:number;c?:CameraAssetState;li?:LightAssetState;n?:NoteAssetState};
+type SavedPoster={x:number;z:number;h:number;r:number};
+type SavedLayout={v:2;m:SavedMarker[];p:SavedPoster[]};
+type UserFrame={origin:vec3;yaw:number};
 /** The exact runtime hooks one placed Light asset needs so its dials can affect something real. */
 type LightMarkerRef={light:LightSource;glowVisual:RenderMeshVisual};
 
@@ -52,6 +60,8 @@ const RAY_REACH=800;
 // Pointing steeper than this (ray direction's y) and the floor is likely too close to be in Specs' view;
 // flatter than LEVEL_POINTING and the user simply isn't pointing at the floor yet.
 const STEEP_POINTING=-0.95,LEVEL_POINTING=-0.2;
+// A hit counts as a wall when its normal is this close to horizontal (|normal.y| below this).
+const WALL_NORMAL_Y=0.3;
 const HINT_SECONDS=2.5;
 const SPINNER_COLOR=new vec4(0.35,1,0.5,1);
 const SPINNER_RADIUS=8,SPINNER_SPEED=7;
@@ -168,6 +178,12 @@ export class ScoutMain extends BaseScriptComponent {
   private hoverHaloImage:Image;
   private hoverLevel=0;
   private hovered:SceneObject=null;
+  private layouts:ScoutLayoutStore;
+  private posters:SceneObject[]=[];
+  // Moodboard → "Pin a Poster": the cursor looks for walls instead of floor until a poster is pinned.
+  private pinningPoster=false;
+  private posterGhost:SceneObject;
+  private wallHit:{position:vec3;normal:vec3;time:number}=null;
 
   onAwake():void {
     this.createEvent("OnStartEvent").bind(()=>this.start());
@@ -179,7 +195,7 @@ export class ScoutMain extends BaseScriptComponent {
     if(!this.palette||!this.markers||!this.placementPreview||!this.camera||!this.markerMaterial){console.error("Scout: required scene references are missing");return}
     this.palette.setBadgeMaterial(this.markerMaterial);
     this.selectAudio=this.audio(SELECT);this.placeAudio=this.audio(PLACE);
-    this.palette.onSelect.add(kind=>{this.selected=kind;this.lastAction=getTime();this.selectAudio.play(1);this.rebuildPreview();this.refresh()});
+    this.palette.onSelect.add(kind=>{this.pinningPoster=false;this.selected=kind;this.lastAction=getTime();this.selectAudio.play(1);this.rebuildPreview();this.refresh()});
     this.gizmo=new ScoutTransformGizmo(this.markerMaterial,this.camera,()=>{this.lastAction=getTime();});
     this.hitSession=WorldQuery.createHitTestSessionWithOptions(HitTestSessionOptions.create());
     this.hitSession.start();
@@ -201,6 +217,14 @@ export class ScoutMain extends BaseScriptComponent {
     this.buildHoverHalo();
     this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>this.confirmFloor(y));
     this.palette.onResetFloor.add(()=>this.resetFloor());
+    this.layouts=new ScoutLayoutStore();
+    this.palette.setLayouts(this.layouts.list());
+    this.palette.onSaveLayout.add(()=>this.saveLayout());
+    this.palette.onLoadLayout.add(id=>this.loadLayout(id));
+    this.palette.onRenameLayout.add(id=>this.renameLayout(id));
+    this.palette.onDeleteLayout.add(id=>{this.lastAction=getTime();this.layouts.remove(id);this.palette.setLayouts(this.layouts.list());this.selectAudio.play(1);});
+    this.posterGhost=buildPoster(this.markerMaterial,true);this.posterGhost.enabled=false;
+    this.palette.onPinPoster.add(()=>{this.lastAction=getTime();this.pending=null;this.pinningPoster=true;this.wallHit=null;});
     this.rebuildPreview();this.refresh();this.ready=true;
     console.log("Scout ready: point at the floor to set it, then choose equipment, notes, or actors.");
   }
@@ -245,7 +269,7 @@ export class ScoutMain extends BaseScriptComponent {
       if(this.interactors.indexOf(interactor)>=0)return;
       this.interactors.push(interactor);
       interactor.onTriggerStart.add(target=>{
-        if(interactor.inputType===InteractorInputType.Mouse && !target && this.selected!==HAND_KIND && getTime()-this.lastAction>0.25) this.placeAt(interactor);
+        if(interactor.inputType===InteractorInputType.Mouse && !target && (this.selected!==HAND_KIND||this.pinningPoster) && getTime()-this.lastAction>0.25) this.placeAt(interactor);
       });
     });
     // Hand pinch remains available in empty space even when SIK has no direct target.
@@ -253,7 +277,7 @@ export class ScoutMain extends BaseScriptComponent {
       const hand=HandInputData.getInstance().getHand(side);
       const down=hand.isPinching();
       const interactor=all.find(i=>i.inputType===(index===0?InteractorInputType.LeftHand:InteractorInputType.RightHand));
-      if(down&&!this.pinched[index]&&!interactor?.currentInteractable&&this.selected!==HAND_KIND&&getTime()-this.lastAction>0.25){
+      if(down&&!this.pinched[index]&&!interactor?.currentInteractable&&(this.selected!==HAND_KIND||this.pinningPoster)&&getTime()-this.lastAction>0.25){
         this.placeAt(interactor);
       }
       this.pinched[index]=down;
@@ -275,12 +299,14 @@ export class ScoutMain extends BaseScriptComponent {
     if(this.paletteShown===settingUp){this.paletteShown=!settingUp;this.palette.sceneObject.enabled=!settingUp;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
-    if(settingUp){
+    if(settingUp||this.pinningPoster){
       this.placementPreview.enabled=false;
       this.updateGroundIndicator(false,aim);
+      this.updatePosterGhost(ray,aim);
       this.updatePlacementFeedback(false,ray,aim);
       return;
     }
+    this.posterGhost.enabled=false;
     // No fresh hit under the cursor: fall back to the known floor, never to the midair aim height.
     const surfaceY=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewGroundY:this.floorY;
     // Hits only arrive a few times a second, so the spot itself is recomputed every frame as where the
@@ -562,6 +588,7 @@ export class ScoutMain extends BaseScriptComponent {
       if(this.floorSetup.canSkip){this.lastAction=getTime();this.floorSetup.skip();}
       return;
     }
+    if(this.pinningPoster){this.pinPoster();return}
     if(this.placed.length>=this.maxMarkers){this.palette.setHint("Marker limit reached — Undo or Clear All");return}
     if(this.pending)return;
     this.lastAction=getTime();
@@ -768,9 +795,145 @@ export class ScoutMain extends BaseScriptComponent {
   }
   private clear():void {
     this.lastAction=getTime();this.placed.forEach(obj=>{if(!isNull(obj))obj.destroy()});
+    this.posters.forEach(obj=>{if(!isNull(obj))obj.destroy()});this.posters=[];
     this.placed=[];this.kinds=[];this.groundY=[];
     this.cameraStates=[];this.lightStates=[];this.lightRefs=[];this.noteStates=[];
     this.selectAudio.play(1);this.refresh();console.log("Scout cleared");
+  }
+  /** While pinning: a dimmed poster follows the wall under the cursor, or a hint asks for a wall. */
+  private updatePosterGhost(ray:PointerRay,aim:vec3):void {
+    if(!this.pinningPoster){this.posterGhost.enabled=false;return}
+    this.hitSession?.hitTest(ray.start,ray.start.add(ray.dir.uniformScale(RAY_REACH)),hit=>{
+      // Walls only: a near-vertical surface, so its normal is near-horizontal.
+      if(hit&&Math.abs(hit.normal.y)<WALL_NORMAL_Y)this.wallHit={position:hit.position,normal:hit.normal,time:getTime()};
+    });
+    const fresh=this.wallHit&&getTime()-this.wallHit.time<PREVIEW_HIT_FRESH;
+    this.posterGhost.enabled=!!fresh;
+    if(fresh){this.placePosterOnWall(this.posterGhost,this.wallHit.position,this.wallHit.normal);this.hintUntil=-100;}
+    else this.showHint("Point at a wall to pin the poster");
+  }
+  private pinPoster():void {
+    if(!this.wallHit||getTime()-this.wallHit.time>=PREVIEW_HIT_FRESH){this.showHint("Point at a wall to pin the poster");return}
+    this.lastAction=getTime();
+    const poster=this.makePoster();
+    this.placePosterOnWall(poster,this.wallHit.position,this.wallHit.normal);
+    this.pinningPoster=false;this.posterGhost.enabled=false;
+    this.placeAudio.play(1);
+    console.log("Scout pinned a poster");
+  }
+  /** Flat against the wall, upright, facing out of it, its bottom kept clear of the floor. */
+  private placePosterOnWall(poster:SceneObject,position:vec3,normal:vec3):void {
+    const out=new vec3(normal.x,0,normal.z).normalize();
+    const minY=(this.floorY===null?position.y:this.floorY)+POSTER_HEIGHT/2+10;
+    const t=poster.getTransform();
+    t.setWorldPosition(new vec3(position.x,Math.max(position.y,minY),position.z).add(out.uniformScale(1.5)));
+    t.setWorldRotation(quat.lookAt(out,vec3.up()));
+  }
+  private makePoster():SceneObject {
+    const poster=buildPoster(this.markerMaterial,false);
+    const col=poster.createComponent("Physics.ColliderComponent") as ColliderComponent;
+    const shape=Shape.createBoxShape();shape.size=new vec3(POSTER_WIDTH,POSTER_HEIGHT,2);col.shape=shape;
+    poster.createComponent(Interactable.getTypeName());
+    this.palette.addDeleteBadge(poster,new vec3(POSTER_WIDTH/2-2,POSTER_HEIGHT/2+4,1.5),()=>{
+      this.lastAction=getTime();
+      const i=this.posters.indexOf(poster);
+      if(i>=0)this.posters.splice(i,1);
+      if(!isNull(poster))poster.destroy();
+      this.selectAudio.play(1);
+    });
+    this.posters.push(poster);
+    return poster;
+  }
+  /** Where the user stands on the floor and which way they face (yaw only — head pitch must not tilt a
+   * layout). Saving and loading both go through this, so a layout reappears around wherever the user
+   * is standing when they load it. */
+  private userFrame():UserFrame {
+    const cam=this.camera.getTransform(),p=cam.getWorldPosition(),f=cam.forward;
+    return {origin:new vec3(p.x,this.floorY===null?p.y:this.floorY,p.z),yaw:Math.atan2(f.x,f.z)};
+  }
+  private toFrame(frame:UserFrame,p:vec3):{x:number;z:number} {
+    const dx=p.x-frame.origin.x,dz=p.z-frame.origin.z,c=Math.cos(-frame.yaw),s=Math.sin(-frame.yaw);
+    return {x:dx*c+dz*s,z:-dx*s+dz*c};
+  }
+  private fromFrame(frame:UserFrame,x:number,z:number,y:number):vec3 {
+    const c=Math.cos(frame.yaw),s=Math.sin(frame.yaw);
+    return new vec3(frame.origin.x+x*c+z*s,y,frame.origin.z-x*s+z*c);
+  }
+  private yawOf(so:SceneObject):number {const f=so.getTransform().forward;return Math.atan2(f.x,f.z);}
+  /** Menu → Saved Layouts → Save: stored as "Untitled…" straight away, then the keyboard opens to name it
+   * (if it never opens — e.g. in Lens Studio's preview — the layout simply stays Untitled). */
+  private saveLayout():void {
+    this.lastAction=getTime();
+    if(this.layouts.list().length>=MAX_SAVED_LAYOUTS){this.showHint("Delete a saved layout to make room");this.selectAudio.play(1);return}
+    if(!this.placed.length&&!this.posters.length){this.showHint("Place something before saving");this.selectAudio.play(1);return}
+    const frame=this.userFrame(),floor=frame.origin.y;
+    // Millimetres for positions; yaw (radians) needs finer steps — 0.1 rad would be ~6°.
+    const round=(n:number)=>Math.round(n*10)/10,roundYaw=(n:number)=>Math.round(n*1000)/1000;
+    const data:SavedLayout={v:2,
+      m:this.placed.map((root,i)=>{
+        const p=this.toFrame(frame,root.getTransform().getWorldPosition());
+        return {k:this.kinds[i],l:root.name,x:round(p.x),z:round(p.z),h:round(this.bottomOf(root)-floor),
+          r:roundYaw(this.yawOf(root)-frame.yaw),c:this.cameraStates[i]||undefined,li:this.lightStates[i]||undefined,n:this.noteStates[i]||undefined};
+      }),
+      p:this.posters.map(poster=>{
+        const pos=poster.getTransform().getWorldPosition(),p=this.toFrame(frame,pos);
+        return {x:round(p.x),z:round(p.z),h:round(pos.y-floor),r:roundYaw(this.yawOf(poster)-frame.yaw)};
+      }),
+    };
+    const info=this.layouts.save(this.layouts.nextUntitledName(),JSON.stringify(data),data.m.length+data.p.length);
+    if(!info){this.showHint("Couldn't save — storage is full");return}
+    this.placeAudio.play(1);
+    this.palette.setLayouts(this.layouts.list());
+    console.log("Scout saved layout "+info.name+" ("+info.count+" items)");
+    this.renameLayout(info.id);
+  }
+  /** Replaces what's placed now with a saved layout, arranged around where the user is standing. */
+  private loadLayout(id:string):void {
+    this.lastAction=getTime();
+    let data:SavedLayout;
+    try{
+      data=JSON.parse(this.layouts.load(id));
+      if(data?.v!==2||!Array.isArray(data.m)||!Array.isArray(data.p))throw new Error("unsupported format");
+    }catch(e){console.warn("Scout layouts: can't load "+id+" — "+e);this.showHint("That layout couldn't be loaded");return}
+    this.clear();
+    const frame=this.userFrame(),floor=frame.origin.y;
+    for(const m of data.m.slice(0,this.maxMarkers)){
+      if(![0,1,2,3,4].includes(m.k))continue;
+      const surface=floor+m.h;
+      const root=this.makeMarker(m.k,m.l,surface,{cameraState:m.c,lightState:m.li,noteState:m.n} as MarkerRecord);
+      root.getTransform().setWorldPosition(this.fromFrame(frame,m.x,m.z,surface));
+      root.getTransform().setWorldRotation(quat.angleAxis(frame.yaw+m.r,vec3.up()));
+      this.liftOnto(root,surface);
+      if(m.k===1)this.tiltKeyLight(root);
+    }
+    for(const p of data.p){
+      const poster=this.makePoster();
+      poster.getTransform().setWorldPosition(this.fromFrame(frame,p.x,p.z,floor+p.h));
+      poster.getTransform().setWorldRotation(quat.angleAxis(frame.yaw+p.r,vec3.up()));
+    }
+    this.sequence=Math.max(this.sequence,...data.m.map(m=>Number(m.l.match(/(\d+)$/)?.[1])||0));
+    this.refresh();this.placeAudio.play(1);
+    console.log("Scout loaded layout "+id+" ("+data.m.length+" markers, "+data.p.length+" posters)");
+  }
+  /** Opens the Specs keyboard to name a saved layout; the name updates as you type. */
+  private renameLayout(id:string):void {
+    this.lastAction=getTime();
+    const info=this.layouts.get(id);
+    if(!info)return;
+    try{
+      require("LensStudio:TextInputModule");
+      const options=new TextInputSystem.KeyboardOptions();
+      options.enablePreview=true;
+      options.keyboardType=TextInputSystem.KeyboardType.Text;
+      options.returnKeyType=TextInputSystem.ReturnKeyType.Done;
+      options.initialText=info.name;
+      options.onTextChanged=(text:string)=>{this.layouts.rename(id,text.trim()||"Untitled");this.palette.setLayouts(this.layouts.list());};
+      options.onReturnKeyPressed=()=>global.textInputSystem.dismissKeyboard();
+      options.onError=(_code:number,description:string)=>console.warn("Scout keyboard: "+description);
+      global.textInputSystem.requestKeyboard(options);
+    }catch(e){
+      console.warn("Scout keyboard unavailable: "+e);
+    }
   }
   private snapshot():string {
     const data:ScoutLayout={version:1,frame:'manual',markers:this.placed.map((obj,i)=>{
