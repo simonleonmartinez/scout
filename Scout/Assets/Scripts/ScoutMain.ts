@@ -13,6 +13,7 @@ import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets
 import {CameraAssetState, LightAssetState, NoteAssetState, defaultCameraState, defaultLightState, defaultNoteState, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
 import {HOVER_GLOW} from "./ScoutHover";
 
+type PointerRay={start:vec3;dir:vec3};
 /** The exact runtime hooks one placed Light asset needs so its dials can affect something real. */
 type LightMarkerRef={light:LightSource;glowVisual:RenderMeshVisual};
 
@@ -45,8 +46,11 @@ const PREVIEW_HIT_FRESH=0.6;
 const FLAT_NORMAL_Y=0.85;
 // A flat surface only counts as the floor if it's a plausible distance below the user's head (cm).
 const FLOOR_MIN_DROP=40,FLOOR_MAX_DROP=260;
-// Closer than this (cm, horizontally) and the floor under the aim point is likely below Specs' view.
-const CLOSE_AIM_DISTANCE=100;
+// How far along the pointing ray a surface can be found (cm).
+const RAY_REACH=800;
+// Pointing steeper than this (ray direction's y) and the floor is likely too close to be in Specs' view;
+// flatter than LEVEL_POINTING and the user simply isn't pointing at the floor yet.
+const STEEP_POINTING=-0.95,LEVEL_POINTING=-0.2;
 const HINT_SECONDS=2.5;
 const SPINNER_COLOR=new vec4(0.35,1,0.5,1);
 const SPINNER_RADIUS=8,SPINNER_SPEED=7;
@@ -149,7 +153,7 @@ export class ScoutMain extends BaseScriptComponent {
   // Lowest flat surface seen at floor distance below the head — nothing placed may sink beneath it.
   private floorY:number=null;
   private previewHitTime=-100;
-  private pending:{kind:number;position:vec3;started:number}=null;
+  private pending:{kind:number;ray:PointerRay;aim:vec3;started:number}=null;
   private spinner:SceneObject;
   private hint:SceneObject;
   private hintText:Text;
@@ -233,7 +237,7 @@ export class ScoutMain extends BaseScriptComponent {
       if(this.interactors.indexOf(interactor)>=0)return;
       this.interactors.push(interactor);
       interactor.onTriggerStart.add(target=>{
-        if(interactor.inputType===InteractorInputType.Mouse && !target && this.selected!==HAND_KIND && getTime()-this.lastAction>0.25) this.placeAt(this.positionFor(interactor));
+        if(interactor.inputType===InteractorInputType.Mouse && !target && this.selected!==HAND_KIND && getTime()-this.lastAction>0.25) this.placeAt(interactor);
       });
     });
     // Hand pinch remains available in empty space even when SIK has no direct target.
@@ -242,7 +246,7 @@ export class ScoutMain extends BaseScriptComponent {
       const down=hand.isPinching();
       const interactor=all.find(i=>i.inputType===(index===0?InteractorInputType.LeftHand:InteractorInputType.RightHand));
       if(down&&!this.pinched[index]&&!interactor?.currentInteractable&&this.selected!==HAND_KIND&&getTime()-this.lastAction>0.25){
-        this.placeAt(this.positionFor(interactor));
+        this.placeAt(interactor);
       }
       this.pinched[index]=down;
     });
@@ -251,23 +255,26 @@ export class ScoutMain extends BaseScriptComponent {
     // suppress the placement guides — only a real scene object (a placed marker, a gizmo handle) should.
     const blocking=active?.currentInteractable&&!this.isPaletteTarget(active.currentInteractable);
     const canPlace=!blocking&&this.placed.length<this.maxMarkers&&this.selected!==HAND_KIND;
+    const ray=this.rayFor(active);
     const aim=this.positionFor(active);
-    this.groundHitTest(aim,result=>{
-      if(!this.isFlat(result))return;
-      this.previewGroundY=result.position.y;this.previewHitTime=getTime();
-      this.noteSurface(result.position.y);
+    this.surfaceHitTest(ray,aim,point=>{
+      if(!point)return;
+      this.previewGroundY=point.y;this.previewHitTime=getTime();
+      this.noteSurface(point.y);
     });
     // No fresh hit under the cursor: fall back to the known floor, never to the midair aim height.
     const surfaceY=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewGroundY:this.floorY;
-    const y=surfaceY===null?aim.y:surfaceY;
+    // Hits only arrive a few times a second, so the spot itself is recomputed every frame as where the
+    // pointing ray meets that surface height — the grid tracks the cursor smoothly and lands where you aim.
+    const spot=surfaceY===null?aim:this.onPlane(ray,aim,surfaceY);
     this.placementPreview.enabled=canPlace&&surfaceY!==null&&!this.pending;
-    this.placementPreview.getTransform().setWorldPosition(new vec3(aim.x,y,aim.z));
+    this.placementPreview.getTransform().setWorldPosition(spot);
     // Face the user upright at placement; manipulation can adjust the orientation.
     const f=this.camera.getTransform().forward;
     this.placementPreview.getTransform().setWorldRotation(quat.angleAxis(Math.atan2(f.x,f.z),vec3.up()));
-    this.updateGroundIndicator(canPlace&&surfaceY!==null&&!this.pending,new vec3(aim.x,y,aim.z));
+    this.updateGroundIndicator(canPlace&&surfaceY!==null&&!this.pending,spot);
     this.updatePending();
-    this.updatePlacementFeedback(canPlace&&surfaceY===null,aim);
+    this.updatePlacementFeedback(canPlace&&surfaceY===null,ray,aim);
   }
   private lateUpdate():void {
     if(!this.ready)return;
@@ -308,6 +315,7 @@ export class ScoutMain extends BaseScriptComponent {
   /** After a free grab-and-move, drops the marker onto the real surface under it so it never stays
    * hanging midair. With no hit (surface out of view) it's left where it is — the floor clamp still holds. */
   private settleOnSurface(root:SceneObject):void {
+    if(isNull(root))return;
     const p=root.getTransform().getWorldPosition();
     this.groundHitTest(new vec3(p.x,this.bottomOf(root),p.z),result=>{
       if(isNull(root)||!this.isFlat(result))return;
@@ -324,21 +332,21 @@ export class ScoutMain extends BaseScriptComponent {
   private updatePending():void {
     const p=this.pending;
     if(!p)return;
-    this.groundHitTest(p.position,result=>{
-      if(this.pending!==p||!this.isFlat(result))return;
+    this.surfaceHitTest(p.ray,p.aim,point=>{
+      if(this.pending!==p||!point)return;
       this.pending=null;
-      this.noteSurface(result.position.y);
-      this.spawnMarker(p.kind,new vec3(p.position.x,result.position.y,p.position.z));
+      this.noteSurface(point.y);
+      this.spawnMarker(p.kind,point);
     });
     if(getTime()-p.started<PLACE_SEARCH_SECONDS)return;
     this.pending=null;
-    if(this.floorY!==null)this.spawnMarker(p.kind,new vec3(p.position.x,this.floorY,p.position.z));
-    else this.showHint(this.floorHint(p.position));
+    if(this.floorY!==null)this.spawnMarker(p.kind,this.onPlane(p.ray,p.aim,this.floorY));
+    else this.showHint(this.floorHint(p.ray));
   }
-  private floorHint(position:vec3):string {
-    const cam=this.camera.getTransform().getWorldPosition();
-    const close=Math.hypot(position.x-cam.x,position.z-cam.z)<CLOSE_AIM_DISTANCE;
-    return close?"Step back so Specs can see the floor":"Look down at the floor";
+  private floorHint(ray:PointerRay):string {
+    if(ray.dir.y<STEEP_POINTING)return "Step back so Specs can see the floor";
+    if(ray.dir.y>LEVEL_POINTING)return "Look down at the floor";
+    return "Hold steady on the floor";
   }
   private showHint(text:string):void {
     this.hintText.text=text;
@@ -346,10 +354,10 @@ export class ScoutMain extends BaseScriptComponent {
   }
   /** Green spinner + hint text at the cursor: while a pinch is waiting on surface tracking, and while no
    * floor has been found yet at all (so there's nothing honest to show a placement grid on). */
-  private updatePlacementFeedback(searching:boolean,aim:vec3):void {
+  private updatePlacementFeedback(searching:boolean,ray:PointerRay,aim:vec3):void {
     const p=this.pending;
     const spinning=!!p||searching;
-    const anchor=p?new vec3(p.position.x,this.floorY===null?p.position.y:this.floorY,p.position.z):aim;
+    const anchor=p?(this.floorY===null?p.aim:this.onPlane(p.ray,p.aim,this.floorY)):aim;
     const hinting=spinning||getTime()<this.hintUntil;
     this.spinner.enabled=spinning;
     this.hint.enabled=hinting;
@@ -359,7 +367,7 @@ export class ScoutMain extends BaseScriptComponent {
     if(spinning){
       this.spinner.getTransform().setWorldPosition(anchor);
       this.spinner.getTransform().setWorldRotation(facing.multiply(quat.angleAxis(-getTime()*SPINNER_SPEED,vec3.forward())));
-      this.hintText.text=p?"Finding the floor…":this.floorHint(aim);
+      this.hintText.text=p?"Finding the floor…":this.floorHint(ray);
     }
     this.hint.getTransform().setWorldPosition(anchor.add(new vec3(0,SPINNER_RADIUS+6,0)));
     this.hint.getTransform().setWorldRotation(facing);
@@ -447,7 +455,8 @@ export class ScoutMain extends BaseScriptComponent {
   /** Casts straight down from above `position` to find the real-world floor via surface tracking. */
   private groundHitTest(position:vec3,callback:(result:WorldQueryHitTestResult)=>void):void {
     if(!this.hitSession){callback(null);return}
-    const top=new vec3(position.x,position.y+80,position.z);
+    // Never start the cast below head height — an aim point past the floor would otherwise start under it.
+    const top=new vec3(position.x,Math.max(position.y+80,this.camera.getTransform().getWorldPosition().y),position.z);
     const bottom=new vec3(position.x,position.y-400,position.z);
     this.hitSession.hitTest(top,bottom,result=>callback(result));
   }
@@ -472,6 +481,26 @@ export class ScoutMain extends BaseScriptComponent {
     const targetRot=quat.angleAxis(Math.atan2(f.x,f.z),vec3.up());
     this.paletteTransform.setWorldRotation(quat.slerp(this.paletteTransform.getWorldRotation(),targetRot,ease));
   }
+  /** Finds the real surface the user is pointing at: along the pointing ray first (so things land where
+   * they aim, even looking steeply down), then straight down from the midair aim point. Yields the point
+   * to stand on, or null when nothing flat was found. */
+  private surfaceHitTest(ray:PointerRay,aim:vec3,callback:(point:vec3)=>void):void {
+    if(!this.hitSession){callback(null);return}
+    this.hitSession.hitTest(ray.start,ray.start.add(ray.dir.uniformScale(RAY_REACH)),hit=>{
+      if(this.isFlat(hit)){callback(hit.position);return}
+      this.groundHitTest(aim,down=>callback(this.isFlat(down)?this.onPlane(ray,aim,down.position.y):null));
+    });
+  }
+  /** Where the pointing ray crosses height `y`; under the aim point instead when the ray never gets there. */
+  private onPlane(ray:PointerRay,aim:vec3,y:number):vec3 {
+    const t=ray.dir.y<-0.05?(y-ray.start.y)/ray.dir.y:-1;
+    return t>0&&t<RAY_REACH?ray.start.add(ray.dir.uniformScale(t)):new vec3(aim.x,y,aim.z);
+  }
+  private rayFor(interactor?:Interactor):PointerRay {
+    if(interactor?.startPoint&&interactor?.direction)return {start:interactor.startPoint,dir:interactor.direction.normalize()};
+    const cam=this.camera.getTransform();
+    return {start:cam.getWorldPosition(),dir:cam.forward.uniformScale(-1)};
+  }
   private positionFor(interactor?:Interactor):vec3 {
     const cam=this.camera.getTransform();
     const start=interactor?.startPoint;
@@ -484,12 +513,12 @@ export class ScoutMain extends BaseScriptComponent {
     }
     return cam.getWorldPosition().add(cam.forward.uniformScale(-this.placementDistance));
   }
-  private placeAt(position:vec3):void {
+  private placeAt(interactor?:Interactor):void {
     if(this.placed.length>=this.maxMarkers){this.palette.setHint("Marker limit reached — Undo or Clear All");return}
     if(this.pending)return;
     this.lastAction=getTime();
     // Queued, not placed: updatePending waits (spinner showing) for a real surface under the aim point.
-    this.pending={kind:this.selected,position,started:getTime()};
+    this.pending={kind:this.selected,ray:this.rayFor(interactor),aim:this.positionFor(interactor),started:getTime()};
   }
   /** `position` is the point on the real surface; the marker's lowest point is stood on it. */
   private spawnMarker(kind:number,position:vec3):void {
@@ -576,7 +605,14 @@ export class ScoutMain extends BaseScriptComponent {
     const manipulation=root.createComponent(InteractableManipulation.getTypeName()) as InteractableManipulation;
     manipulation.setCanScale(false);
     manipulation.setCanRotate(false);
-    manipulation.onTranslationEnd.add(()=>this.settleOnSurface(root));
+    // Only a real move drops back onto the surface — a tap on a child (dial, badge) can propagate a
+    // zero-length translation here, and must not knock a deliberately raised actor back to the floor.
+    let grabbedAt:vec3=null;
+    manipulation.onTranslationStart.add(()=>{grabbedAt=root.getTransform().getWorldPosition();});
+    manipulation.onTranslationEnd.add(()=>{
+      if(grabbedAt&&!isNull(root)&&root.getTransform().getWorldPosition().distance(grabbedAt)>2)this.settleOnSurface(root);
+      grabbedAt=null;
+    });
     this.placed.push(root);this.kinds.push(kind);this.groundY.push(groundY);
     this.cameraStates.push(cameraState);this.lightStates.push(lightState);this.lightRefs.push(lightRef);
     this.noteStates.push(noteState);
