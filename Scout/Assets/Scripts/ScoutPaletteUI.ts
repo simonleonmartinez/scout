@@ -7,6 +7,7 @@ import {FlexAlign, FlexAlignSelf, FlexDirection, FlexJustify} from "SpectaclesUI
 import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
 import {ScoutRotaryDial, RotaryDialTheme, DialStep} from "./ScoutRotaryDial";
 import {ScoutNoteWizard, NoteWizardTheme} from "./ScoutNoteWizard";
+import {addBackPlateHover, addHoverFeedback} from "./ScoutHover";
 import {CameraAssetState, LightAssetState, NoteAssetState, ISO_STOPS, APERTURE_STOPS, SHUTTER_STOPS, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
 
 const ICONS: Texture[] = [requireAsset("../Icons/videocam.png") as Texture, requireAsset("../Icons/lightbulb.png") as Texture, requireAsset("../Icons/sticky_note_2.png") as Texture, requireAsset("../Icons/undo.png") as Texture, requireAsset("../Icons/delete.png") as Texture];
@@ -192,6 +193,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       this.style(back,BUTTON_TINT,CAP_WIDTH/2);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerStart.add(()=>this.setCollapsed(!this.collapsed));
+      addBackPlateHover(back,cap,BUTTON_TINT);
     });
     const iconHost=this.obj(cap,"Icon",new vec3(0,0,0.5));
     const img=iconHost.createComponent("Component.Image") as Image;
@@ -373,6 +375,8 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       this.style(back,BUTTON_TINT,size/2);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerStart.add(()=>onTap());
+      // Grow only: the opaque sphere in front hides the BackPlate, so a background glow wouldn't show.
+      addHoverFeedback(back.interactable,so);
     });
     const radius=size/2;
     if(this.badgeMaterial){
@@ -437,6 +441,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       this.style(back,BUTTON_TINT,size/2);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerStart.add(()=>onTap());
+      addBackPlateHover(back,so,BUTTON_TINT);
     });
     const iconHost=this.obj(so,"Icon",new vec3(0,0,0.5));
     const img=iconHost.createComponent("Component.Image") as Image;
@@ -486,6 +491,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       this.style(back,BUTTON_TINT,BUTTON_RADIUS);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerEnd.add(()=>action());
+      addBackPlateHover(back,so,BUTTON_TINT);
     });
     const ec=so.createComponent(ElementContent.getTypeName()) as ElementContent;
     ec.sizeOverride=new vec2(w,h);

@@ -11,6 +11,7 @@ import {Interactor,InteractorInputType} from "SpectaclesInteractionKit.lspkg/Cor
 import {HandInputData} from "SpectaclesInteractionKit.lspkg/Providers/HandInputData/HandInputData";
 import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
 import {CameraAssetState, LightAssetState, NoteAssetState, defaultCameraState, defaultLightState, defaultNoteState, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
+import {HOVER_GLOW} from "./ScoutHover";
 
 /** The exact runtime hooks one placed Light asset needs so its dials can affect something real. */
 type LightMarkerRef={light:LightSource;glowVisual:RenderMeshVisual};
@@ -35,7 +36,24 @@ function findChildNamed(root:SceneObject,name:string):SceneObject|null {
   return null;
 }
 const WorldQuery=require("LensStudio:WorldQueryModule") as WorldQueryModule;
-const GROUND_HIT_TIMEOUT=0.2;
+// How long a pinch waits (green spinner showing) for surface tracking to find the real surface under the
+// aim point before giving up — placement never falls back to a midair position.
+const PLACE_SEARCH_SECONDS=1.5;
+// A preview hit older than this no longer describes where the cursor is now.
+const PREVIEW_HIT_FRESH=0.6;
+// Only near-horizontal hits count as something to stand on — a wall or sofa side can't set a height.
+const FLAT_NORMAL_Y=0.85;
+// A flat surface only counts as the floor if it's a plausible distance below the user's head (cm).
+const FLOOR_MIN_DROP=40,FLOOR_MAX_DROP=260;
+// Closer than this (cm, horizontally) and the floor under the aim point is likely below Specs' view.
+const CLOSE_AIM_DISTANCE=100;
+const HINT_SECONDS=2.5;
+const SPINNER_COLOR=new vec4(0.35,1,0.5,1);
+const SPINNER_RADIUS=8,SPINNER_SPEED=7;
+const HINT_COLOR=new vec4(0.75,1,0.8,1);
+const HINT_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
+const HOVER_HALO=requireAsset("../Icons/hover_glow.png") as Texture;
+const HOVER_HALO_ALPHA=0.55,HOVER_HALO_EASE=12;
 const GROUND_INDICATOR=requireAsset("../Icons/ground_indicator.png") as Texture;
 const GROUND_INDICATOR_COLOR=new vec4(0.72,0.58,1,1);
 const GROUND_INDICATOR_FOOTPRINTS=[80,80,26,65,65]; // Camera, Light, Note, Standing, Seated — matches marker collider footprints
@@ -101,7 +119,7 @@ export class ScoutMain extends BaseScriptComponent {
   @input @allowUndefined seatedPrefab:ObjectPrefab;
   private shared:ScoutSharedSession;
   private kinds:number[]=[];
-  private groundY:number[]=[];
+  private groundY:number[]=[]; // real-surface Y each marker stands on (its lowest point, not its root)
   // Camera and Light are two separate state systems — separate types, separate arrays — that only
   // happen to be indexed in parallel with `placed`/`kinds`. Each entry is a fresh object made by
   // defaultCameraState()/defaultLightState() per marker, so no two assets can ever share one.
@@ -128,10 +146,24 @@ export class ScoutMain extends BaseScriptComponent {
   private ready=false;
   private pinched=[false,false];
   private hitSession:HitTestSession;
+  // Lowest flat surface seen at floor distance below the head — nothing placed may sink beneath it.
+  private floorY:number=null;
+  private previewHitTime=-100;
+  private pending:{kind:number;position:vec3;started:number}=null;
+  private spinner:SceneObject;
+  private hint:SceneObject;
+  private hintText:Text;
+  private hintUntil=-100;
+  private hoverHalo:SceneObject;
+  private hoverHaloImage:Image;
+  private hoverLevel=0;
+  private hovered:SceneObject=null;
 
   onAwake():void {
     this.createEvent("OnStartEvent").bind(()=>this.start());
     this.createEvent("UpdateEvent").bind(()=>this.update());
+    // LateUpdate so the floor clamp runs after SIK's manipulation has moved a marker this frame.
+    this.createEvent("LateUpdateEvent").bind(()=>this.lateUpdate());
   }
   private start():void {
     if(!this.palette||!this.markers||!this.placementPreview||!this.camera||!this.markerMaterial){console.error("Scout: required scene references are missing");return}
@@ -155,6 +187,8 @@ export class ScoutMain extends BaseScriptComponent {
       this.palette.onRecover.add(()=>{this.lastAction=getTime();this.shared.load(raw=>this.restore(raw));});
     }
     this.buildGroundIndicator();
+    this.buildPlacementFeedback();
+    this.buildHoverHalo();
     this.rebuildPreview();this.refresh();this.ready=true;
     console.log("Scout ready: choose equipment, notes, or actors; pinch empty space to place.");
   }
@@ -168,8 +202,10 @@ export class ScoutMain extends BaseScriptComponent {
     const prefab=this.prefabFor(this.selected);
     if(prefab){
       this.previewShape=prefab.instantiate(this.placementPreview);
-      // A small cursor model indicates the selected tool without hiding the venue.
-      this.previewShape.getTransform().setLocalPosition(new vec3(0,-15,0));
+      // A small cursor model indicates the selected tool without hiding the venue. Stand it on the ground
+      // grid by its lowest point (not its pivot), the same way placed markers stand on the floor.
+      const visual=findMeshVisual(this.previewShape);
+      if(visual)this.previewShape.getTransform().setLocalPosition(new vec3(0,this.placementPreview.getTransform().getWorldPosition().y-visual.worldAabbMin().y,0));
     }else if(this.selected===2){
       // The Note's pin+notepad is too tall/wide to usefully preview while just aiming — the pulsing
       // ground indicator (built once, shared by every asset type) is enough to show where it'll land.
@@ -215,15 +251,175 @@ export class ScoutMain extends BaseScriptComponent {
     // suppress the placement guides — only a real scene object (a placed marker, a gizmo handle) should.
     const blocking=active?.currentInteractable&&!this.isPaletteTarget(active.currentInteractable);
     const canPlace=!blocking&&this.placed.length<this.maxMarkers&&this.selected!==HAND_KIND;
-    this.placementPreview.enabled=canPlace;
     const aim=this.positionFor(active);
-    this.groundHitTest(aim,result=>{if(result)this.previewGroundY=result.position.y;});
-    const y=this.previewGroundY===null?aim.y:this.previewGroundY;
+    this.groundHitTest(aim,result=>{
+      if(!this.isFlat(result))return;
+      this.previewGroundY=result.position.y;this.previewHitTime=getTime();
+      this.noteSurface(result.position.y);
+    });
+    // No fresh hit under the cursor: fall back to the known floor, never to the midair aim height.
+    const surfaceY=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewGroundY:this.floorY;
+    const y=surfaceY===null?aim.y:surfaceY;
+    this.placementPreview.enabled=canPlace&&surfaceY!==null&&!this.pending;
     this.placementPreview.getTransform().setWorldPosition(new vec3(aim.x,y,aim.z));
     // Face the user upright at placement; manipulation can adjust the orientation.
     const f=this.camera.getTransform().forward;
     this.placementPreview.getTransform().setWorldRotation(quat.angleAxis(Math.atan2(f.x,f.z),vec3.up()));
-    this.updateGroundIndicator(canPlace,new vec3(aim.x,y,aim.z));
+    this.updateGroundIndicator(canPlace&&surfaceY!==null&&!this.pending,new vec3(aim.x,y,aim.z));
+    this.updatePending();
+    this.updatePlacementFeedback(canPlace&&surfaceY===null,aim);
+  }
+  private lateUpdate():void {
+    if(!this.ready)return;
+    this.keepAboveFloor();
+    this.updateHoverHalo();
+  }
+  private isFlat(result:WorldQueryHitTestResult):boolean {
+    return !!result&&result.normal.y>FLAT_NORMAL_Y;
+  }
+  /** Tracks the real floor as the lowest flat surface seen a plausible distance below the user's head. */
+  private noteSurface(y:number):void {
+    const head=this.camera.getTransform().getWorldPosition().y;
+    if(y>head-FLOOR_MIN_DROP||y<head-FLOOR_MAX_DROP)return;
+    if(this.floorY===null||y<this.floorY)this.floorY=y;
+  }
+  /** World Y of a marker's lowest point, measured from its actual mesh so it's right whatever pivot the
+   * model was exported with. */
+  private bottomOf(root:SceneObject):number {
+    const visual=findMeshVisual(root);
+    return visual?visual.worldAabbMin().y:root.getTransform().getWorldPosition().y;
+  }
+  /** Moves a marker vertically so its lowest point rests at `surfaceY`. */
+  private liftOnto(root:SceneObject,surfaceY:number):void {
+    const t=root.getTransform();
+    t.setWorldPosition(t.getWorldPosition().add(new vec3(0,surfaceY-this.bottomOf(root),0)));
+  }
+  /** Nothing may sit below the floor — not after a grab, a gizmo drag, or a restored layout. */
+  private keepAboveFloor():void {
+    this.placed.forEach((root,i)=>{
+      if(isNull(root))return;
+      const floor=this.floorY===null?this.groundY[i]:this.floorY;
+      if(this.bottomOf(root)<floor-0.5){
+        this.liftOnto(root,floor);
+        if(this.editing===root)this.gizmo.update();
+      }
+    });
+  }
+  /** After a free grab-and-move, drops the marker onto the real surface under it so it never stays
+   * hanging midair. With no hit (surface out of view) it's left where it is — the floor clamp still holds. */
+  private settleOnSurface(root:SceneObject):void {
+    const p=root.getTransform().getWorldPosition();
+    this.groundHitTest(new vec3(p.x,this.bottomOf(root),p.z),result=>{
+      if(isNull(root)||!this.isFlat(result))return;
+      const idx=this.placed.indexOf(root);
+      if(idx<0)return;
+      this.noteSurface(result.position.y);
+      this.groundY[idx]=result.position.y;
+      this.liftOnto(root,result.position.y);
+      if(this.editing===root)this.gizmo.update();
+    });
+  }
+  /** Resolves a queued pinch: places on the first flat hit, or on the known floor once the search window
+   * runs out, or — if no floor has ever been seen — cancels with a hint instead of dropping it midair. */
+  private updatePending():void {
+    const p=this.pending;
+    if(!p)return;
+    this.groundHitTest(p.position,result=>{
+      if(this.pending!==p||!this.isFlat(result))return;
+      this.pending=null;
+      this.noteSurface(result.position.y);
+      this.spawnMarker(p.kind,new vec3(p.position.x,result.position.y,p.position.z));
+    });
+    if(getTime()-p.started<PLACE_SEARCH_SECONDS)return;
+    this.pending=null;
+    if(this.floorY!==null)this.spawnMarker(p.kind,new vec3(p.position.x,this.floorY,p.position.z));
+    else this.showHint(this.floorHint(p.position));
+  }
+  private floorHint(position:vec3):string {
+    const cam=this.camera.getTransform().getWorldPosition();
+    const close=Math.hypot(position.x-cam.x,position.z-cam.z)<CLOSE_AIM_DISTANCE;
+    return close?"Step back so Specs can see the floor":"Look down at the floor";
+  }
+  private showHint(text:string):void {
+    this.hintText.text=text;
+    this.hintUntil=getTime()+HINT_SECONDS;
+  }
+  /** Green spinner + hint text at the cursor: while a pinch is waiting on surface tracking, and while no
+   * floor has been found yet at all (so there's nothing honest to show a placement grid on). */
+  private updatePlacementFeedback(searching:boolean,aim:vec3):void {
+    const p=this.pending;
+    const spinning=!!p||searching;
+    const anchor=p?new vec3(p.position.x,this.floorY===null?p.position.y:this.floorY,p.position.z):aim;
+    const hinting=spinning||getTime()<this.hintUntil;
+    this.spinner.enabled=spinning;
+    this.hint.enabled=hinting;
+    if(!spinning&&!hinting)return;
+    const toCamera=this.camera.getTransform().getWorldPosition().sub(anchor).normalize();
+    const facing=quat.lookAt(toCamera,vec3.up());
+    if(spinning){
+      this.spinner.getTransform().setWorldPosition(anchor);
+      this.spinner.getTransform().setWorldRotation(facing.multiply(quat.angleAxis(-getTime()*SPINNER_SPEED,vec3.forward())));
+      this.hintText.text=p?"Finding the floor…":this.floorHint(aim);
+    }
+    this.hint.getTransform().setWorldPosition(anchor.add(new vec3(0,SPINNER_RADIUS+6,0)));
+    this.hint.getTransform().setWorldRotation(facing);
+  }
+  /** A three-quarter ring whose brightness fades toward its tail — on an additive display the dim end
+   * simply vanishes, so it reads as a spinning comet. Drawn over everything, like the gizmo handles. */
+  private buildPlacementFeedback():void {
+    const spinner=global.scene.createSceneObject("PlacementSpinner");
+    const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
+    b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
+    const segs=36,sweep=1.5*Math.PI,inner=SPINNER_RADIUS-0.7,outer=SPINNER_RADIUS+0.7;
+    const ix:number[]=[];
+    for(let i=0;i<=segs;i++){
+      const a=i/segs*sweep,k=0.15+0.85*i/segs;
+      const c=[SPINNER_COLOR.x*k,SPINNER_COLOR.y*k,SPINNER_COLOR.z*k,1];
+      b.appendVerticesInterleaved([inner*Math.cos(a),inner*Math.sin(a),0,0,0,1,...c]);
+      b.appendVerticesInterleaved([outer*Math.cos(a),outer*Math.sin(a),0,0,0,1,...c]);
+      // Both windings so the flat ring shows from either side.
+      if(i<segs){const v=i*2;ix.push(v,v+1,v+3,v,v+3,v+2,v,v+3,v+1,v,v+2,v+3);}
+    }
+    b.appendIndices(ix);
+    const visual=spinner.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    const material=this.markerMaterial.clone();
+    material.mainPass.depthTest=false;material.mainPass.depthWrite=false;
+    visual.mesh=b.getMesh();visual.mainMaterial=material;visual.setRenderOrder(100);b.updateMesh();
+    spinner.enabled=false;
+    this.spinner=spinner;
+    const hint=global.scene.createSceneObject("PlacementHint");
+    const t=hint.createComponent("Component.Text") as Text;
+    t.font=HINT_FONT;t.size=180;t.textFill.color=HINT_COLOR;t.depthTest=false;
+    t.horizontalAlignment=HorizontalAlignment.Center;t.verticalAlignment=VerticalAlignment.Bottom;
+    t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
+    hint.enabled=false;
+    this.hint=hint;this.hintText=t;
+  }
+  /** Soft purple glow on the floor under whichever placed marker the cursor is on. */
+  private buildHoverHalo():void {
+    const so=global.scene.createSceneObject("HoverHalo");
+    so.getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
+    const img=so.createComponent("Component.Image") as Image;
+    img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
+    img.mainPass.baseTex=HOVER_HALO;
+    so.enabled=false;
+    this.hoverHalo=so;this.hoverHaloImage=img;
+  }
+  private updateHoverHalo():void {
+    const target=this.hovered&&!isNull(this.hovered)&&this.placed.indexOf(this.hovered)>=0?this.hovered:null;
+    if(!target)this.hovered=null;
+    const goal=target?1:0;
+    this.hoverLevel+=(goal-this.hoverLevel)*Math.min(1,getDeltaTime()*HOVER_HALO_EASE);
+    if(this.hoverLevel<0.01&&!target){this.hoverHalo.enabled=false;return}
+    this.hoverHalo.enabled=true;
+    if(target){
+      const idx=this.placed.indexOf(target);
+      const p=target.getTransform().getWorldPosition();
+      this.hoverHalo.getTransform().setWorldPosition(new vec3(p.x,this.bottomOf(target)+GROUND_INDICATOR_LIFT,p.z));
+      const size=GROUND_INDICATOR_FOOTPRINTS[this.kinds[idx]]*1.6;
+      this.hoverHalo.getTransform().setLocalScale(new vec3(size,size,1));
+    }
+    this.hoverHaloImage.mainPass.baseColor=new vec4(HOVER_GLOW.x,HOVER_GLOW.y,HOVER_GLOW.z,HOVER_HALO_ALPHA*this.hoverLevel);
   }
   /** True if a targeted interactable belongs to the palette (buttons, badges, the cap) rather than the 3D scene. */
   private isPaletteTarget(interactable:{sceneObject?:SceneObject}):boolean {
@@ -290,16 +486,12 @@ export class ScoutMain extends BaseScriptComponent {
   }
   private placeAt(position:vec3):void {
     if(this.placed.length>=this.maxMarkers){this.palette.setHint("Marker limit reached — Undo or Clear All");return}
+    if(this.pending)return;
     this.lastAction=getTime();
-    const kind=this.selected;
-    let committed=false;
-    const commit=(grounded:vec3)=>{if(committed)return;committed=true;this.spawnMarker(kind,grounded);};
-    // Snap to the real floor when surface tracking resolves in time; otherwise fall back to the aimed midair position.
-    this.groundHitTest(position,result=>commit(result?new vec3(position.x,result.position.y,position.z):position));
-    const timeout=this.createEvent("DelayedCallbackEvent");
-    timeout.bind(()=>commit(position));
-    timeout.reset(GROUND_HIT_TIMEOUT);
+    // Queued, not placed: updatePending waits (spinner showing) for a real surface under the aim point.
+    this.pending={kind:this.selected,position,started:getTime()};
   }
+  /** `position` is the point on the real surface; the marker's lowest point is stood on it. */
   private spawnMarker(kind:number,position:vec3):void {
     const label=TOOL_NAMES[kind]+" "+String(++this.sequence).padStart(2,"0");
     const root=this.makeMarker(kind,label,position.y);
@@ -311,6 +503,9 @@ export class ScoutMain extends BaseScriptComponent {
     // dial/label card) ends up facing 90° off, sideways to whoever just placed it.
     const cameraCorrection=kind===0?Math.PI/2:0;
     root.getTransform().setWorldRotation(quat.angleAxis(Math.atan2(f.x,f.z)+cameraCorrection,vec3.up()));
+    // The models' pivots aren't at their feet (the Camera's mesh was centered on the floor, half buried),
+    // so stand each on its actual lowest point rather than its pivot.
+    this.liftOnto(root,position.y);
     if(kind===1)this.tiltKeyLight(root);
     this.placeAudio.play(1);this.refresh();
     console.log("Scout placed "+label);
@@ -376,9 +571,12 @@ export class ScoutMain extends BaseScriptComponent {
     const interactable=root.createComponent(Interactable.getTypeName()) as Interactable;
     interactable.targetingMode=3;
     interactable.onTriggerStart.add(()=>{this.lastAction=getTime();});
+    interactable.onHoverEnter.add(()=>{this.hovered=root;});
+    interactable.onHoverExit.add(()=>{if(this.hovered===root)this.hovered=null;});
     const manipulation=root.createComponent(InteractableManipulation.getTypeName()) as InteractableManipulation;
     manipulation.setCanScale(false);
     manipulation.setCanRotate(false);
+    manipulation.onTranslationEnd.add(()=>this.settleOnSurface(root));
     this.placed.push(root);this.kinds.push(kind);this.groundY.push(groundY);
     this.cameraStates.push(cameraState);this.lightStates.push(lightState);this.lightRefs.push(lightRef);
     this.noteStates.push(noteState);
@@ -462,7 +660,10 @@ export class ScoutMain extends BaseScriptComponent {
     if(this.gizmo.isEditing(root)){this.gizmo.select(null);this.editing=null;return}
     this.editing=root;
     const allowVertical=this.kinds[idx]===3||this.kinds[idx]===4;
-    this.gizmo.select(root,allowVertical,this.groundY[idx]);
+    // The gizmo clamps the root, so translate "lowest point on the floor" into a minimum root height.
+    const floor=this.floorY===null?this.groundY[idx]:this.floorY;
+    const minRootY=root.getTransform().getWorldPosition().y-this.bottomOf(root)+floor;
+    this.gizmo.select(root,allowVertical,minRootY);
     this.gizmo.setMode("Show handles");
   }
   private deleteMarker(root:SceneObject):void {
@@ -505,7 +706,7 @@ export class ScoutMain extends BaseScriptComponent {
       t.setLocalPosition(new vec3(m.position[0],m.position[1],m.position[2]));
       t.setLocalRotation(new quat(m.rotation[0],m.rotation[1],m.rotation[2],m.rotation[3]));
       if(m.kind===1)this.tiltKeyLight(obj);
-      this.groundY[this.groundY.length-1]=t.getWorldPosition().y;
+      this.groundY[this.groundY.length-1]=this.bottomOf(obj);
     }
     this.sequence=Math.max(this.sequence,...data.markers.map(m=>Number(m.label.match(/(\d+)$/)?.[1])||0));this.refresh();
   }

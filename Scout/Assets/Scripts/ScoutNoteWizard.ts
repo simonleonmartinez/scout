@@ -1,4 +1,5 @@
 import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {addBackPlateHover} from "./ScoutHover";
 import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
 import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
 import {addBox} from "./ScoutMarkerMesh";
@@ -114,6 +115,7 @@ export class ScoutNoteWizard {
       this.style(back,this.theme.idleColor,3);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerEnd.add(()=>this.commit({step:1}));
+      addBackPlateHover(back,btn,this.theme.idleColor);
     });
     this.text(btn,"Write note?",new vec3(0,0,0.3),PANEL_W-28,17,this.theme.textColor,124);
   }
@@ -138,6 +140,7 @@ export class ScoutNoteWizard {
         this.style(back,selected?this.theme.activeColor:this.theme.idleColor,2);
         back.interactionPlane.enabled=false;
         back.interactable.onTriggerEnd.add(()=>this.commit({shotNumber:n,step:2}));
+        addBackPlateHover(back,cell,selected?this.theme.activeColor:this.theme.idleColor);
       });
       this.text(cell,String(n),new vec3(0,0,0.3),cellW-3,cellH-3,this.theme.textColor,90);
     }
@@ -162,6 +165,7 @@ export class ScoutNoteWizard {
         this.style(back,this.theme.idleColor,2);
         back.interactionPlane.enabled=false;
         back.interactable.onTriggerEnd.add(()=>onPick(i));
+        addBackPlateHover(back,cell,this.theme.idleColor);
       });
       const iconHost=this.obj(cell,"Icon",new vec3(0,4,0.3));
       const img=iconHost.createComponent("Component.Image") as Image;
@@ -185,6 +189,7 @@ export class ScoutNoteWizard {
       this.style(back,this.theme.idleColor,2);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerEnd.add(()=>this.commit({step:1}));
+      addBackPlateHover(back,redo,this.theme.idleColor);
     });
     this.text(redo,"Edit",new vec3(0,0,0.3),26,8,this.theme.textColor,72);
   }
@@ -196,6 +201,7 @@ export class ScoutNoteWizard {
       this.style(back,this.theme.idleColor,4.5);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerEnd.add(onTap);
+      addBackPlateHover(back,so,this.theme.idleColor);
     });
     const iconHost=this.obj(so,"Icon",new vec3(0,0,0.4));
     const img=iconHost.createComponent("Component.Image") as Image;
