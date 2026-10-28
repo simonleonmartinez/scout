@@ -53,6 +53,18 @@ const NOTE_ACCENT_TINT=new vec4(0.42,0.32,0.82,1);
 const NOTE_IDLE_TINT=new vec4(0.64,0.60,0.74,1);
 const NOTE_HOVER_TINT=new vec4(0.72,0.68,0.82,1);
 const NOTE_ACTIVE_TINT=new vec4(0.50,0.42,0.78,1);
+// Camera angle monitor: width (cm), backward tilt (degrees), and its gear-style inks.
+const ANGLE_SCREEN_W=30,ANGLE_SCREEN_TILT=12;
+const ANGLE_INK=new vec4(0.93,0.88,0.78,1);
+const ANGLE_INK_DIM=new vec4(0.93,0.88,0.78,0.6);
+const ANGLE_SCREEN_OFF=new vec4(0.07,0.07,0.08,1);
+const ANGLE_STALE_TINT=new vec4(1,0.66,0.25,1);
+// Stand-in "captured" photos until the real Specs still capture is wired up.
+const ANGLE_MOCK_VIDEO=requireAsset("../Textures/angle_capture_mock_video.png") as Texture;
+const ANGLE_MOCK_PHOTO=requireAsset("../Textures/angle_capture_mock_photo.png") as Texture;
+const PHOTO_CAMERA_ICON=requireAsset("../Icons/photo_camera.png") as Texture;
+// Plain white, tinted per use, for flat shapes (frame-lines, banners, the screen when off).
+const WHITE=requireAsset("../Textures/white.png") as Texture;
 const PANEL_RADIUS=2.6,BUTTON_RADIUS=1.4;
 const CAP_WIDTH=6,CAP_HEIGHT=14;
 const TOOLBAR_ICON=6,TOOLBAR_GAP=1.2,TOOLBAR_COUNT=5;
@@ -75,6 +87,16 @@ function applyTextRole(t: Text, role: keyof typeof TYPE_SCALE): void {
   (t as Text & {weight?:number}).weight = TYPE_SCALE[role].weight;
 }
 
+/** empty: no photo yet · guiding: walking the user to the camera's spot · captured · stale: the camera
+ * has moved since its photo was taken. */
+export type AngleScreenState="empty"|"guiding"|"captured"|"stale";
+export interface AngleScreen {
+  setState(state:AngleScreenState):void;
+  /** Replaces the screen's title line (guidance and countdown while guiding). */
+  setStatus(text:string):void;
+  /** The photo shown once the state is captured or stale. */
+  setImage(texture:Texture):void;
+}
 /** Passive UIKit views for the palette and the labels attached to placed markers. */
 @component
 export class ScoutPaletteUI extends BaseScriptComponent {
@@ -407,6 +429,111 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       {label:"Shutter",steps:SHUTTER_STOPS,initialIndex:state.shutterIndex,onChange:i=>onChange({shutterIndex:i})},
       {label:"WB",steps:KELVIN_STOPS,initialIndex:state.kelvinIndex,onChange:i=>onChange({kelvinIndex:i}),fillColorForValue:kelvinFill},
     ]);
+  }
+  /** The Camera asset's "angle" monitor: a screen above its dial row, on the same operator-facing side,
+   * that holds a reference photo taken from where the camera stands. View only — ScoutAngleCapture
+   * drives its state, status text and image. */
+  buildAngleScreen(root:SceneObject,labelY:number,photo:boolean,onCapture:()=>void,onCancel:()=>void):AngleScreen {
+    if(!this.badgeMaterial)return null;
+    const w=ANGLE_SCREEN_W,h=photo?w*2/3:w*9/16;
+    const pad=1.2,strip=7;
+    const panelW=w+pad*2,panelH=h+pad*2+strip;
+    // Stacked over the dial row (see buildControlsRow's own layout) with the same gap the row keeps
+    // above the label card.
+    const controlsTop=labelY+1.6+2+(5.2*2+9);
+    const y=controlsTop+2+panelH/2;
+    const host=this.obj(root,"Angle screen",new vec3(-4,y,0));
+    // Same backAxis-1 mount as the dials, then tipped back a little like a monitor on a rig, so it
+    // faces someone standing behind the camera rather than the ceiling-height it sits at.
+    host.getTransform().setLocalRotation(quat.rotationFromTo(vec3.forward(),vec3.right().uniformScale(-1))
+      .multiply(quat.angleAxis(-ANGLE_SCREEN_TILT*Math.PI/180,vec3.right())));
+    host.createComponent("Component.Canvas");
+    const back=host.createComponent(BackPlate.getTypeName()) as BackPlate;
+    back.style="simple";
+    back.size=new vec2(panelW,panelH);
+    const buttonNames=["Capture this angle","Cancel","Retake"];
+    back.onInitialized.add(()=>{
+      this.style(back,DIAL_PANEL_TINT,PANEL_RADIUS);
+      back.interactable.enabled=false;
+      back.interactionPlane.enabled=false;
+      // Same defensive sweep as the dial row: the frame's own collider would block the buttons.
+      const disable=this.createEvent("DelayedCallbackEvent");
+      disable.bind(()=>{
+        const visit=(node:SceneObject)=>{
+          if(buttonNames.indexOf(node.name)>=0)return;
+          node.getComponents("Physics.ColliderComponent").forEach(c=>c.enabled=false);
+          for(let i=0;i<node.getChildrenCount();i++)visit(node.getChild(i));
+        };visit(host);
+      });disable.reset(0.1);
+    });
+    const screenY=strip/2;
+    // The viewfinder: the photo once there is one, a dark "screen off" until then.
+    const screenSo=this.obj(host,"Viewfinder",new vec3(0,screenY,0.3));
+    screenSo.getTransform().setLocalScale(new vec3(w,h,1));
+    const screen=screenSo.createComponent("Component.Image") as Image;
+    screen.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
+    screen.mainPass.baseTex=WHITE;
+    screen.mainPass.baseColor=ANGLE_SCREEN_OFF;
+    // Cream corner frame-lines, like a camera monitor's guides.
+    const guides=this.obj(host,"Guides",new vec3(0,screenY,0.4));
+    const arm=3.2,thick=0.28,inset=1.2;
+    for(const sx of [-1,1])for(const sy of [-1,1]){
+      const cx=sx*(w/2-inset),cy=sy*(h/2-inset);
+      this.bar(guides,new vec3(cx-sx*arm/2,cy,0),arm,thick,ANGLE_INK);
+      this.bar(guides,new vec3(cx,cy-sy*arm/2,0),thick,arm,ANGLE_INK);
+    }
+    this.label(guides,photo?"3:2":"16:9",new vec3(-w/2+inset+2.8,h/2-inset-1.6,0),34,ANGLE_INK,HorizontalAlignment.Center);
+    // Centre prompt: title + one line of guidance, swapped by state.
+    const title=this.label(host,"",new vec3(0,screenY+1.6,0.5),62,ANGLE_INK,HorizontalAlignment.Center);
+    const detail=this.label(host,"",new vec3(0,screenY-2.2,0.5),38,ANGLE_INK_DIM,HorizontalAlignment.Center);
+    // "Angle changed" banner across the top of a stale photo.
+    const banner=this.obj(host,"Stale banner",new vec3(0,screenY+h/2-2.4,0.5));
+    this.bar(banner,vec3.zero(),w,3.6,ANGLE_STALE_TINT);
+    this.label(banner,"Angle changed · retake",new vec3(0,0,0.1),40,new vec4(0.1,0.08,0.05,1),HorizontalAlignment.Center);
+    // Bottom strip: exactly one action button at a time.
+    const stripY=-panelH/2+pad+strip/2-0.4;
+    const action=(name:string,icon:Texture,bw:number,fn:()=>void)=>{
+      const row=this.obj(host,name+" row",new vec3(0,stripY,0.5));
+      const f=this.flex(row,FlexDirection.Row,bw,5,0,0);
+      this.button(f,name,bw,4.6,icon,fn);
+      return row;
+    };
+    const captureRow=action(buttonNames[0],PHOTO_CAMERA_ICON,22,onCapture);
+    const cancelRow=action(buttonNames[1],CLOSE_ICON,14,onCancel);
+    const retakeRow=action(buttonNames[2],RESET_FLOOR_ICON,14,onCapture);
+    let image:Texture=photo?ANGLE_MOCK_PHOTO:ANGLE_MOCK_VIDEO;
+    const view:AngleScreen={
+      setState:(state:AngleScreenState)=>{
+        const hasPhoto=state==="captured"||state==="stale";
+        screen.mainPass.baseColor=hasPhoto?new vec4(1,1,1,1):ANGLE_SCREEN_OFF;
+        screen.mainPass.baseTex=hasPhoto?image:WHITE;
+        banner.enabled=state==="stale";
+        captureRow.enabled=state==="empty";
+        cancelRow.enabled=state==="guiding";
+        retakeRow.enabled=hasPhoto;
+        title.getSceneObject().enabled=detail.getSceneObject().enabled=!hasPhoto;
+        if(state==="empty"){title.text="No angle yet";detail.text="Take a reference photo from where this camera stands";}
+        if(state==="guiding"){title.text="Walk to the camera";detail.text="Stand on the marker and face the shot";}
+      },
+      setStatus:(text:string)=>{title.text=text;},
+      setImage:(tex:Texture)=>{image=tex;},
+    };
+    view.setState("empty");
+    return view;
+  }
+  /** Flat tinted rectangle (frame-lines, banners). */
+  private bar(parent:SceneObject,pos:vec3,w:number,h:number,tint:vec4):void {
+    const so=this.obj(parent,"Bar",pos);so.getTransform().setLocalScale(new vec3(w,h,1));
+    const img=so.createComponent("Component.Image") as Image;
+    img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();img.mainPass.baseTex=WHITE;img.mainPass.baseColor=tint;
+  }
+  private label(parent:SceneObject,value:string,pos:vec3,size:number,color:vec4,align:HorizontalAlignment):Text {
+    const so=this.obj(parent,"Text",pos);
+    const t=so.createComponent("Component.Text") as Text;
+    t.text=value;t.font=THEME_FONT;t.size=size;t.textFill.color=color;t.depthTest=true;
+    t.horizontalAlignment=align;t.verticalAlignment=VerticalAlignment.Center;
+    t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
+    return t;
   }
   /** Compact Intensity/Kelvin dial row for one placed Light asset — both dials drive the marker's
    * real-time LightSource via ScoutMain.applyLightLook. */

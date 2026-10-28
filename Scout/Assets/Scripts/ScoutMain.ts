@@ -16,6 +16,7 @@ import {ScoutFloorSetup} from "./ScoutFloorSetup";
 import {ScoutLayoutStore,MAX_SAVED_LAYOUTS} from "./ScoutLayoutStore";
 import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
 import {ScoutWorkbench,ShootType} from "./ScoutWorkbench";
+import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
@@ -203,6 +204,8 @@ export class ScoutMain extends BaseScriptComponent {
   private workbench:ScoutWorkbench;
   private workbenchShown=false;
   private shootType:ShootType=null;
+  // Each Camera asset's "capture this angle" monitor and the walk-over guide behind it.
+  private angleCapture:ScoutAngleCapture;
 
   onAwake():void {
     this.createEvent("OnStartEvent").bind(()=>this.start());
@@ -240,6 +243,9 @@ export class ScoutMain extends BaseScriptComponent {
       bench:this.workbenchPrefab,cinemaCamera:this.cinemaCameraPrefab,gimbal:this.gimbalPrefab,lens:this.lensPrefab,
       clapperboard:this.clapperboardPrefab,filmReel:this.filmReelPrefab,photoCamera:this.photoCameraPrefab,
     },type=>this.chooseShoot(type));
+    this.angleCapture=new ScoutAngleCapture(this.markerMaterial,this.camera,
+      ()=>this.floorY===null?this.camera.getTransform().getWorldPosition().y-150:this.floorY,
+      (seconds,fn)=>{const ev=this.createEvent("DelayedCallbackEvent");ev.bind(fn);ev.reset(seconds);});
     this.layouts=new ScoutLayoutStore();
     this.palette.setLayouts(this.layouts.list());
     this.palette.onSaveLayout.add(()=>this.saveLayout());
@@ -330,7 +336,8 @@ export class ScoutMain extends BaseScriptComponent {
     if(this.paletteShown===settingUp){this.paletteShown=!settingUp;this.palette.sceneObject.enabled=!settingUp;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
-    if(settingUp||this.pinningPoster){
+    this.angleCapture.update();
+    if(settingUp||this.pinningPoster||this.angleCapture.guiding){
       this.placementPreview.enabled=false;
       this.updateGroundIndicator(false,aim);
       this.updatePosterGhost(ray,aim);
@@ -628,6 +635,8 @@ export class ScoutMain extends BaseScriptComponent {
     return cam.getWorldPosition().add(cam.forward.uniformScale(-this.placementDistance));
   }
   private placeAt(interactor?:Interactor):void {
+    // Walking over to capture a camera angle: a stray pinch must not drop a new asset.
+    if(this.angleCapture.guiding)return;
     if(!this.floorSetup.done){
       if(this.floorSetup.canSkip){this.lastAction=getTime();this.floorSetup.skip();}
       return;
@@ -713,7 +722,16 @@ export class ScoutMain extends BaseScriptComponent {
     // requested for them); Light dials drive the marker's own LightSource/glow directly by closing
     // over `lightRef` — never an array index, so a later deletion of some other marker can't leave
     // this callback pointing at the wrong asset.
-    if(cameraState)this.palette.buildCameraControls(root,labelY,cameraState,patch=>Object.assign(cameraState,patch));
+    if(cameraState){
+      this.palette.buildCameraControls(root,labelY,cameraState,patch=>Object.assign(cameraState,patch));
+      // Monitor above the dials for a reference photo of this camera's angle.
+      const photo=this.shootType==="photo";
+      let rec:AngleCameraRecord=null;
+      const screen=this.palette.buildAngleScreen(root,labelY,photo,
+        ()=>{this.lastAction=getTime();if(rec)this.angleCapture.start(rec);},
+        ()=>{this.lastAction=getTime();this.angleCapture.cancel();});
+      if(screen)rec=this.angleCapture.register(root,screen,photo);
+    }
     if(lightState){
       const ref=lightRef;
       this.palette.buildLightControls(root,labelY,lightState,patch=>{
