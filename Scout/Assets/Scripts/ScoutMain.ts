@@ -11,7 +11,7 @@ import {Interactor,InteractorInputType} from "SpectaclesInteractionKit.lspkg/Cor
 import {HandInputData} from "SpectaclesInteractionKit.lspkg/Providers/HandInputData/HandInputData";
 import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
 import {CameraAssetState, LightAssetState, NoteAssetState, defaultCameraState, defaultLightState, defaultNoteState, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
-import {HOVER_GLOW} from "./ScoutHover";
+import {HOVER_GLOW,addHoverFeedback} from "./ScoutHover";
 import {ScoutFloorSetup} from "./ScoutFloorSetup";
 import {ScoutLayoutStore,MAX_SAVED_LAYOUTS} from "./ScoutLayoutStore";
 import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
@@ -70,6 +70,8 @@ const HINT_COLOR=new vec4(0.75,1,0.8,1);
 const HINT_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 const HOVER_HALO=requireAsset("../Icons/hover_glow.png") as Texture;
 const HOVER_HALO_ALPHA=0.55,HOVER_HALO_EASE=12;
+// Hovered props grow by less than buttons do: on a person-sized model even 5% is clearly visible.
+const MARKER_HOVER_SCALE=1.05;
 // Voice naming: how long a pause ends the name, and a cap in case nothing is ever said.
 const VOICE_SILENCE_MS=1500,VOICE_TIMEOUT=10,VOICE_NAME_MAX=40;
 const GROUND_INDICATOR=requireAsset("../Icons/ground_indicator.png") as Texture;
@@ -317,12 +319,14 @@ export class ScoutMain extends BaseScriptComponent {
       this.noteSurface(point.y);
     });
     // First run: nothing can be placed (and the palette stays hidden) until the floor is set and a shoot
-    // type is picked at the workbench.
-    if(this.floorSetup.done&&this.shootType===null&&!this.workbenchShown){
+    // type is picked at the workbench. The bench only stands on a real floor height: after a skipped setup
+    // it waits (with the "look at the floor" hint) until surface tracking first sees the floor.
+    const benchWaiting=this.floorSetup.done&&this.shootType===null&&!this.workbenchShown;
+    if(benchWaiting&&this.floorY!==null){
       this.workbenchShown=true;
-      this.workbench.show(this.floorY===null?this.camera.getTransform().getWorldPosition().y-150:this.floorY);
+      this.workbench.show(this.floorY);
     }
-    const settingUp=!this.floorSetup.done||this.workbench.active;
+    const settingUp=!this.floorSetup.done||(benchWaiting&&!this.workbenchShown)||this.workbench.active;
     if(this.paletteShown===settingUp){this.paletteShown=!settingUp;this.palette.sceneObject.enabled=!settingUp;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
@@ -330,7 +334,7 @@ export class ScoutMain extends BaseScriptComponent {
       this.placementPreview.enabled=false;
       this.updateGroundIndicator(false,aim);
       this.updatePosterGhost(ray,aim);
-      this.updatePlacementFeedback(false,ray,aim);
+      this.updatePlacementFeedback(benchWaiting&&!this.workbenchShown,ray,aim);
       return;
     }
     this.posterGhost.enabled=false;
@@ -393,6 +397,18 @@ export class ScoutMain extends BaseScriptComponent {
   private bottomOf(root:SceneObject):number {
     const visual=findMeshVisual(root);
     return visual?visual.worldAabbMin().y:root.getTransform().getWorldPosition().y;
+  }
+  /** Drops `body` (a fresh marker's pivot, still at the root's origin) to its mesh's lowest point while
+   * keeping the mesh where it is, so scaling `body` grows the prop up from its feet. */
+  private pivotAtFeet(root:SceneObject,body:SceneObject):void {
+    const visual=findMeshVisual(body);
+    if(!visual)return;
+    const feet=visual.worldAabbMin().y-root.getTransform().getWorldPosition().y;
+    body.getTransform().setLocalPosition(new vec3(0,feet,0));
+    for(let i=0;i<body.getChildrenCount();i++){
+      const t=body.getChild(i).getTransform();
+      t.setLocalPosition(t.getLocalPosition().sub(new vec3(0,feet,0)));
+    }
   }
   /** Moves a marker vertically so its lowest point rests at `surfaceY`. */
   private liftOnto(root:SceneObject,surfaceY:number):void {
@@ -666,10 +682,14 @@ export class ScoutMain extends BaseScriptComponent {
     const lightState=kind===1?{...defaultLightState(),...saved?.lightState}:null;
     const noteState=kind===2?{...defaultNoteState(),...saved?.noteState}:null;
     let lightRef:LightMarkerRef|null=null;
+    // The prop's body hangs under a pivot at its feet (kept the root's first child, so bottomOf still
+    // finds the body's mesh first): hover grows the pivot, so the prop swells up from the floor.
+    const body=global.scene.createSceneObject("Body");body.setParent(root);
     if(prefab){
-      const model=prefab.instantiate(root),t=model.getTransform();
+      const model=prefab.instantiate(body),t=model.getTransform();
       t.setLocalScale(t.getLocalScale().uniformScale(height/30));
       t.setLocalPosition(new vec3(0,-height/2,0));
+      this.pivotAtFeet(root,body);
       if(lightState)lightRef=this.buildKeyLight(model,lightState);
       // Standing/seated subjects both cast and receive shadows on themselves so a nearby key light
       // actually shows contours (nose, contact shadows) on the subject, not just floodlighting it.
@@ -677,7 +697,10 @@ export class ScoutMain extends BaseScriptComponent {
         const visual=findMeshVisual(model);
         if(visual)visual.meshShadowMode=MeshShadowMode.Both;
       }
-    }else buildMarkerMesh(root,kind,this.markerMaterial,false);
+    }else{
+      buildMarkerMesh(body,kind,this.markerMaterial,false);
+      this.pivotAtFeet(root,body);
+    }
     // Note's pin rises from the floor to eye level, so its interactive content anchors near the top of
     // the pin rather than just above a ground-level card, like every other asset's label/dial row does.
     const labelY=kind===2?NOTE_PIN_HEIGHT:height/2+8;
@@ -704,8 +727,17 @@ export class ScoutMain extends BaseScriptComponent {
     const interactable=root.createComponent(Interactable.getTypeName()) as Interactable;
     interactable.targetingMode=3;
     interactable.onTriggerStart.add(()=>{this.lastAction=getTime();});
-    interactable.onHoverEnter.add(()=>{this.hovered=root;});
+    // The floor halo and the grow below track the prop itself, not the label/dials floating above it,
+    // whose hover SIK bubbles up to this interactable too.
+    const onProp=(e:{target:Interactable})=>{      if(e.target===interactable)this.hovered=root;
+      else if(this.hovered===root)this.hovered=null;
+    };
+    interactable.onHoverEnter.add(onProp);
+    interactable.onHoverUpdate.add(onProp);
     interactable.onHoverExit.add(()=>{if(this.hovered===root)this.hovered=null;});
+    // The prop itself grows a touch under the cursor, like the buttons, so it reads as grabbable.
+    // Notes skip it: their pin carries its own wizard buttons, which already respond to hover.
+    if(kind!==2)addHoverFeedback(interactable,body,undefined,MARKER_HOVER_SCALE,true);
     const manipulation=root.createComponent(InteractableManipulation.getTypeName()) as InteractableManipulation;
     manipulation.setCanScale(false);
     manipulation.setCanRotate(false);

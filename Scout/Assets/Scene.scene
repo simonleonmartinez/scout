@@ -7,6 +7,7 @@
     - !<own> a7ed2ca6-9ef4-4f3d-95c9-207d0d9620dc
     - !<own> fb84d0dd-f7e5-48fc-962d-339d5fcae84d
     - !<own> e87ba2c5-df96-4ffb-b321-fe15b5f51cba
+    - !<own> 389be8e9-91ec-4ee7-a47a-507f82a5dea4
   layers: !<Layers/267ee9a7-aff2-4f9d-9a49-f71214747d03>
     userLayers:
       - id: 1
@@ -122,6 +123,7 @@
   EnvMapRotation: 0.000000
   DiffuseEnvTexture: !<reference> 00000000-0000-0000-0000-000000000000
   SpecularEnvTexture: !<reference> 00000000-0000-0000-0000-000000000000
+  SpecularCubemapTexture: !<reference> 00000000-0000-0000-0000-000000000000
   Color: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
   ShadowColor: {x: 0.000000, y: 0.000000, z: 0.000000, w: 1.000000}
   DynamicEnvInputTexture: !<reference> 00000000-0000-0000-0000-000000000000
@@ -167,6 +169,9 @@
   EstimationSharpness: 1.000000
   EnvMapExposure: 1.000000
   EnvMapRotation: 0.000000
+  DiffuseEnvTexture: !<reference> 00000000-0000-0000-0000-000000000000
+  SpecularEnvTexture: !<reference> 00000000-0000-0000-0000-000000000000
+  SpecularCubemapTexture: !<reference> 054dcb15-b114-7918-5d37-41437206317f
   Color: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
   ShadowColor: {x: 0.000000, y: 0.000000, z: 0.000000, w: 1.000000}
   DynamicEnvInputTexture: !<reference> 00000000-0000-0000-0000-000000000000
@@ -175,7 +180,6 @@
   FalloffType: None
   FalloffRange: .inf
   ShadowType: None
-  SpecularCubemapTexture: !<reference> 054dcb15-b114-7918-5d37-41437206317f
 - !<SceneObject/010e353a-1e10-4970-b759-afc71239f853>
   PrefabRemaps:
     []
@@ -642,6 +646,22 @@
     - !<own> bd966e17-6eb2-40f5-9531-f3fd68bef4bd
   Components:
     []
+- !<SceneObject/389be8e9-91ec-4ee7-a47a-507f82a5dea4>
+  PrefabRemaps:
+    []
+  Name: AiPreviewAgent Handler
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 603bb734-03b8-45e0-916f-693fbf3e1acb
+    - !<own> 7d99d531-8584-4467-939e-4edc476db6c0
 - !<SceneObject/3b82f465-5a0d-4b52-b783-7b5aeecc100b>
   PrefabRemaps:
     []
@@ -850,6 +870,22 @@
     - !<own> 4a478f75-8b10-4fd3-ad06-720b354df4fe
   Components:
     []
+- !<ScriptComponent/603bb734-03b8-45e0-916f-693fbf3e1acb>
+  PrefabRemaps:
+    []
+  Name: AgentInspectScript
+  Enabled: true
+  ScriptAsset: !<reference> 0b25079c-f5bf-4c6d-96c4-f43b89dfa213
+  ScriptInputsDefault:
+    {}
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      {}
+  ScriptTypes:
+    "":
+      {}
 - !<SceneObject/65b72003-f15a-4901-9b58-ce7bf358a154>
   PrefabRemaps:
     []
@@ -1034,6 +1070,22 @@
     - !<own> b6575e88-c7a3-41a6-8536-26ed86f32e78
   Components:
     []
+- !<ScriptComponent/7d99d531-8584-4467-939e-4edc476db6c0>
+  PrefabRemaps:
+    []
+  Name: AgentInteractScript
+  Enabled: true
+  ScriptAsset: !<reference> 29091811-e792-46be-bfa4-28ddec5f11be
+  ScriptInputsDefault:
+    {}
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      {}
+  ScriptTypes:
+    "":
+      {}
 - !<SceneObject/7e333b63-7aa7-47cd-a7cf-e42ed13186c9>
   PrefabRemaps:
     []
@@ -2597,6 +2649,12 @@
     maxMarkers: true
     debugColliders: true
     sfxVolume: true
+    cinemaCameraPrefab: true
+    gimbalPrefab: true
+    lensPrefab: true
+    clapperboardPrefab: true
+    filmReelPrefab: true
+    photoCameraPrefab: true
   ScriptTypesDefault:
     {}
   ScriptInputs:
@@ -2616,6 +2674,13 @@
       lightPrefab: !<reference.ObjectPrefab> 8a4d422b-8fad-4cdc-9f95-c0a9a30a6027
       standingPrefab: !<reference.ObjectPrefab> ef8de357-600f-4e3e-bf56-86e692a66f9d
       seatedPrefab: !<reference.ObjectPrefab> 52dada4a-a82e-4212-bfd1-bc72b650c41f
+      workbenchPrefab: !<reference.ObjectPrefab> e146f070-abf6-4b90-8a49-1fad9d861877
+      cinemaCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      gimbalPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      lensPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      clapperboardPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      filmReelPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      photoCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
   ScriptTypes:
     "":
       {}

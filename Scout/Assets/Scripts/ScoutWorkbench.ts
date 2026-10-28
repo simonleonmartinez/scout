@@ -15,7 +15,6 @@ const PHOTO_ICON=requireAsset("../Icons/photo_camera.png") as Texture;
 const VIDEO_ICON=requireAsset("../Icons/videocam.png") as Texture;
 const GLOW=requireAsset("../Icons/hover_glow.png") as Texture;
 const BODY_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
-const TECH_FONT=requireAsset("../Fonts/Orbitron.ttf") as Font;
 const HEADER_TINT=new vec4(0xc1/255,0xad/255,0xff/255,1);
 
 const BENCH_DISTANCE=140; // cm in front of the user
@@ -34,14 +33,19 @@ const GEAR_SLOTS:{key:keyof WorkbenchGear;x:number;z:number;yaw:number}[]=[
 // Console: a chunky base with an operator panel tilted up toward the user.
 const CONSOLE_W=64,CONSOLE_H=8,CONSOLE_D=26,CONSOLE_Z=14,PANEL_TILT=30;
 const BUTTON_X=16,CAP_RADIUS=6.5,BEZEL_RADIUS=8.8,PRESS_DEPTH=1.8;
-const HOUSING:[number,number,number,number]=[0.13,0.12,0.16,1];
-const PANEL:[number,number,number,number]=[0.2,0.18,0.25,1];
-const BEZEL:[number,number,number,number]=[0.62,0.62,0.68,1];
-const TRIM:[number,number,number,number]=[0.42,0.32,0.82,1];
-// Retro-futuristic pair: amber for photo, cyan for video.
-const PHOTO_COLOR=new vec4(1,0.62,0.18,1);
-const VIDEO_COLOR=new vec4(0.3,0.9,1,1);
-const GLOW_IDLE=0.3,GLOW_HOVER=0.95;
+// Styled as film-set kit to sit with the bench model: a matte-black road case (like the bench frame and
+// gear) with brushed-aluminium corner guards and trim (like its drawer pulls), on a gunmetal panel.
+const HOUSING:[number,number,number,number]=[0.1,0.1,0.11,1];
+const PANEL:[number,number,number,number]=[0.22,0.22,0.23,1];
+const BEZEL:[number,number,number,number]=[0.72,0.72,0.74,1];
+const TRIM:[number,number,number,number]=[0.62,0.62,0.65,1];
+const GUARD=1.4; // corner-guard half-thickness (cm)
+const LABEL_PLATE:[number,number,number,number]=[0.06,0.06,0.07,1];
+const LABEL_INK=new vec4(0.93,0.88,0.78,1); // chalk cream, like the slate's lettering
+// Film-set pair: tungsten amber for photo, record red for video.
+const PHOTO_COLOR=new vec4(1,0.66,0.25,1);
+const VIDEO_COLOR=new vec4(0.92,0.2,0.16,1);
+const GLOW_IDLE=0.2,GLOW_HOVER=0.8;
 const HIDE_SECONDS=0.35;
 
 /** First-run "What are you planning?" bench: camera gear on a workbench and two physical buttons —
@@ -73,13 +77,13 @@ export class ScoutWorkbench {
     this.buildButton(panel,BUTTON_X,"VIDEO SHOOT",VIDEO_ICON,VIDEO_COLOR,"video");
   }
 
-  /** The generated bench if there is one (its top measured from the mesh), else a plain stand-in. */
+  /** The generated bench if there is one, else a plain stand-in. The generated bench carries its gear
+   * baked in, so its mesh top isn't the table top: it's authored with the table top at BENCH_TOP. */
   private buildBench():number {
     if(this.gear.bench){
       const model=this.gear.bench.instantiate(this.root);
       model.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.up()));
-      const visual=findVisual(model);
-      if(visual)return visual.worldAabbMax().y-this.root.getTransform().getWorldPosition().y;
+      return BENCH_TOP;
     }
     const b=this.builder(),ix:number[]=[];
     let v=addBox(b,ix,0,BENCH_TOP-2,0,BENCH_W/2,2,BENCH_D/2,[0.45,0.32,0.22,1],0);
@@ -116,8 +120,11 @@ export class ScoutWorkbench {
     base.getTransform().setLocalPosition(new vec3(0,top,CONSOLE_Z));
     const b=this.builder(),ix:number[]=[];
     let v=addBox(b,ix,0,CONSOLE_H/2,0,CONSOLE_W/2,CONSOLE_H/2,CONSOLE_D/2,HOUSING,0);
-    // Accent trim strip along the front edge — the bit of colour that makes it read as a device.
+    // Aluminium trim strip along the front edge and road-case guards on the four vertical corners.
     v=addBox(b,ix,0,CONSOLE_H*0.55,CONSOLE_D/2+0.2,CONSOLE_W/2-2,0.6,0.3,TRIM,v);
+    for(const sx of [-1,1])for(const sz of [-1,1]){
+      v=addBox(b,ix,sx*(CONSOLE_W/2-GUARD+0.3),CONSOLE_H/2,sz*(CONSOLE_D/2-GUARD+0.3),GUARD,CONSOLE_H/2+0.2,GUARD,TRIM,v);
+    }
     b.appendIndices(ix);
     this.visual(base,b);
     // The operator panel hinges at the base's front-top edge and rises toward the back, so its face (+Y)
@@ -137,8 +144,8 @@ export class ScoutWorkbench {
     this.visual(panel,pb);
     return panel;
   }
-  /** A chunky arcade-style push button: metal bezel, glowing halo, coloured cap with an icon, and an
-   * engraved-style label. Hover grows the cap and brightens the halo; pressing sinks the cap. */
+  /** A chunky industrial push button: aluminium bezel, soft halo, coloured cap with an icon, and a
+   * label plate. Hover grows the cap and brightens the halo; pressing sinks the cap. */
   private buildButton(panel:SceneObject,x:number,label:string,icon:Texture,color:vec4,type:ShootType):void {
     const host=this.child(panel,label);
     // Buttons toward the back of the panel, labels between them and the front edge.
@@ -156,7 +163,12 @@ export class ScoutWorkbench {
     this.visual(cap,capB);
     const iconImg=this.image(cap,icon,new vec3(0,5.6,0),CAP_RADIUS*1.1,CAP_RADIUS*1.1,new vec4(0.08,0.06,0.12,1));
     iconImg.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
-    const labelText=this.text(host,label,new vec3(0,0.4,BEZEL_RADIUS+4.5),TECH_FONT,90,new vec4(color.x,color.y,color.z,1));
+    // Cream lettering on a dark plate, like the labels on the gear.
+    const plateB=this.builder(),plateIx:number[]=[];
+    addBox(plateB,plateIx,0,0.2,BEZEL_RADIUS+4.5,BEZEL_RADIUS+1.5,0.15,2.4,LABEL_PLATE,0);
+    plateB.appendIndices(plateIx);
+    this.visual(this.child(host,"LabelPlate"),plateB);
+    const labelText=this.text(host,label,new vec3(0,0.4,BEZEL_RADIUS+4.5),BODY_FONT,80,LABEL_INK);
     labelText.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
     const collider=cap.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();shape.size=new vec3(BEZEL_RADIUS*2,8,BEZEL_RADIUS*2);collider.shape=shape;
@@ -236,10 +248,4 @@ export class ScoutWorkbench {
     t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
     return t;
   }
-}
-function findVisual(root:SceneObject):RenderMeshVisual {
-  const v=root.getComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-  if(v)return v;
-  for(let i=0;i<root.getChildrenCount();i++){const f=findVisual(root.getChild(i));if(f)return f;}
-  return null;
 }

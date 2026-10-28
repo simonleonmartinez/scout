@@ -4,11 +4,8 @@ studioVersion:
   patch: 1
   build: 26100516
   type: Public
-  buildFlavor: release
-  timestamp: 1791218063000
-  commit: 31cf4f69d53d8942888f490016bbf02a5346f51d
-coreVersion: 372
-clientVersion: 14.16
+coreVersion: 377
+clientVersion: 14.21
 updateCheckpoint: 107
 sceneId: 0a1ccb1a-fe88-4fbb-9883-e3af3c75fd99
 metaInfo:
@@ -31,6 +28,7 @@ metaInfo:
   platformBundlesEnabled: false
   iconHash: 62c68dfc1be3603d76ad751ca3b125be
   videoPreviewHash: ""
+  localizationsHash: ""
   fromTemplateName: Default
   fromTemplateUrl: Lens Studio 5.23.2.26081320
   activationCamera: Front

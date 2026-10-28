@@ -1,0 +1,95 @@
+- !<AssetImportMetadata/612d3f23-3b84-417a-8e3c-767f06bd0aa9>
+  ImportedAssetIds:
+    .hidden/WorkbenchRemesh: !<reference> 686d9c4a-a172-42f1-acf7-526aa959c550
+    .hidden/white: !<reference> b640a67f-e258-474b-9754-30fdd7dfa039
+    26ba073d67b9d0dd: !<reference> 2a6699d7-fd43-42b0-86e8-7a0e8f64559f
+    461efd1fdfc3583d: !<reference> 25f6dcb8-c62f-4f71-9659-6ae59fff4301
+    753420f2d54be714: !<reference> de2897da-3eab-4db7-bc31-f72fa768b789
+    Materials/WorkbenchRemesh: !<reference> 21d473d6-ec71-4e7e-aae3-0a8dd60d54e6
+    Materials/WorkbenchRemesh|WorkbenchRemesh|GraphPassInfo: !<reference> 9ec2d61d-e539-4c94-b993-e82017bb7a49
+    Meshes/Meshy_AI_The_Filmmaker_s_Workbench_20261027_texture_remesh_tri: !<reference> cdcbae13-f1a1-4fa2-9498-178d7a6a51ad
+    Scene: !<reference> e146f070-abf6-4b90-8a49-1fad9d861877
+    Textures/WorkbenchRemesh: !<reference> 178e398d-be21-4042-9fb3-0f34ae44f920
+  ImporterName: ObjImporter
+  PrimaryAsset: !<reference> e146f070-abf6-4b90-8a49-1fad9d861877
+  PackageType: LegacyPackage
+  LegacyPackagePolicy: CanBeUnpackedTransparent
+  ExtraData:
+    {}
+  AssetDataMap:
+    Scene: !<own> c1c8a414-f458-4ec5-a90c-d7cb2685bb85
+  DependentFiles:
+    - WorkbenchRemesh.jpg
+    - WorkbenchRemesh.mtl
+  ImporterSettings: !<D3FileImporterSettingsBase>
+    UseLegacyImporter: false
+    WithMaterials: true
+    NamingConvention: ByCategorySanitizeV2
+    PersistentIdGenerationAlgorithm: DescriptorBasedV2
+  CompressionSettings: !<ComplexCompressionSettings>
+    Presets:
+      Performance Compression: !<PerformanceCompressionSettings>
+        Level: Medium
+        Mipmap: false
+      None Compression: !<FileCompressionSettings>
+        {}
+    ExtensionMappings:
+      jpg: Performance Compression
+      mesh: None Compression
+    Overrides:
+      {}
+- !<RenderMeshVisual/25f6dcb8-c62f-4f71-69a6-951a6000bcfe>
+  PrefabRemaps:
+    []
+  Name: component_0
+  Enabled: true
+  RenderOrder: 0
+  StretchMode: Stretch
+  VerticalAlignment: Center
+  HorizontalAlignment: Center
+  MeshShadowMode: None
+  ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+  ShadowDensity: 1.000000
+  Materials:
+    - !<reference> 21d473d6-ec71-4e7e-aae3-0a8dd60d54e6
+  Mesh: !<reference> cdcbae13-f1a1-4fa2-9498-178d7a6a51ad
+  Skin: !<reference> 00000000-0000-0000-0000-000000000000
+  BlendShapesEnabled: true
+  BlendNormals: false
+  BlendShapes:
+    {}
+- !<SceneObject/2a6699d7-fd43-42b0-7917-85f1709baa60>
+  PrefabRemaps:
+    []
+  Name: WorkbenchRemesh
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    - !<own> de2897da-3eab-4db7-43ce-08d058974876
+  Components:
+    []
+- !<ObjectPrefabAssetData/c1c8a414-f458-4ec5-a90c-d7cb2685bb85>
+  Prototype: !<ObjectOwner/00c7490f-ff46-4e7e-bb6f-53dff7dc0759>
+    PackagePath: ""
+    objects:
+      - !<own> 2a6699d7-fd43-42b0-7917-85f1709baa60
+- !<SceneObject/de2897da-3eab-4db7-43ce-08d058974876>
+  PrefabRemaps:
+    []
+  Name: Meshy_AI_The_Filmmaker_s_Workbench_20261027_texture_remesh_tri
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 25f6dcb8-c62f-4f71-69a6-951a6000bcfe
