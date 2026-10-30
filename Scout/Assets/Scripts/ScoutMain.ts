@@ -17,6 +17,7 @@ import {ScoutLayoutStore,MAX_SAVED_LAYOUTS} from "./ScoutLayoutStore";
 import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
 import {ScoutWorkbench,ShootType} from "./ScoutWorkbench";
 import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
+import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
@@ -51,6 +52,9 @@ const WorldQuery=require("LensStudio:WorldQueryModule") as WorldQueryModule;
 // How long a pinch waits (green spinner showing) for surface tracking to find the real surface under the
 // aim point before giving up — placement never falls back to a midair position.
 const PLACE_SEARCH_SECONDS=1.5;
+// A fist grabs the prop hovered up to this long ago (s) — the targeting ray drifts as the hand closes.
+// Also how recent a queued placement must be for a starting grab to cancel it as the fist's own pinch.
+const GRAB_TARGET_GRACE=0.35;
 // A preview hit older than this no longer describes where the cursor is now.
 const PREVIEW_HIT_FRESH=0.6;
 // Only near-horizontal hits count as something to stand on — a wall or sofa side can't set a height.
@@ -206,6 +210,9 @@ export class ScoutMain extends BaseScriptComponent {
   private shootType:ShootType=null;
   // Each Camera asset's "capture this angle" monitor and the walk-over guide behind it.
   private angleCapture:ScoutAngleCapture;
+  // Fist-to-move for placed props, and the last prop the cursor was on (its grab target).
+  private grabMove:ScoutGrabMove;
+  private hoverSeen:{root:SceneObject;time:number}=null;
 
   onAwake():void {
     this.createEvent("OnStartEvent").bind(()=>this.start());
@@ -217,7 +224,7 @@ export class ScoutMain extends BaseScriptComponent {
     if(!this.palette||!this.markers||!this.placementPreview||!this.camera||!this.markerMaterial){console.error("Scout: required scene references are missing");return}
     this.palette.setBadgeMaterial(this.markerMaterial);
     this.selectAudio=this.audio(SELECT);this.placeAudio=this.audio(PLACE);
-    this.palette.onSelect.add(kind=>{this.pinningPoster=false;this.selected=kind;this.lastAction=getTime();this.selectAudio.play(1);this.rebuildPreview();this.refresh()});
+    this.palette.onSelect.add(kind=>{this.pinningPoster=false;this.selected=kind;this.lastAction=getTime();this.selectAudio.play(1);this.rebuildPreview();this.refresh();this.applyDragMode()});
     this.gizmo=new ScoutTransformGizmo(this.markerMaterial,this.camera,()=>{this.lastAction=getTime();});
     this.hitSession=WorldQuery.createHitTestSessionWithOptions(HitTestSessionOptions.create());
     this.hitSession.start();
@@ -243,6 +250,28 @@ export class ScoutMain extends BaseScriptComponent {
       bench:this.workbenchPrefab,cinemaCamera:this.cinemaCameraPrefab,gimbal:this.gimbalPrefab,lens:this.lensPrefab,
       clapperboard:this.clapperboardPrefab,filmReel:this.filmReelPrefab,photoCamera:this.photoCameraPrefab,
     },type=>this.chooseShoot(type));
+    this.grabMove=new ScoutGrabMove(this.camera,{
+      target:()=>{
+        // The prop under the cursor — or the one there a moment ago, since the targeting ray drifts as
+        // the hand closes. Not one being walked to for an angle capture or open in the gizmo.
+        const seen=this.hoverSeen&&getTime()-this.hoverSeen.time<GRAB_TARGET_GRACE?this.hoverSeen.root:null;
+        const root=this.hovered&&!isNull(this.hovered)?this.hovered:seen;
+        if(!root||isNull(root)||this.placed.indexOf(root)<0||this.gizmo.isEditing(root)||this.angleCapture.guiding)return null;
+        return root;
+      },
+      onStart:root=>{
+        this.lastAction=getTime();
+        // The fist's pinch may already have queued a placement a moment ago; it was a grab, not a place.
+        if(this.pending&&getTime()-this.pending.started<GRAB_TARGET_GRACE)this.pending=null;
+        this.setCanDrag(root,false);
+        this.selectAudio.play(1);
+      },
+      onEnd:(root,moved)=>{
+        this.lastAction=getTime();
+        this.setCanDrag(root,this.selected===HAND_KIND);
+        if(moved){this.settleOnSurface(root);this.placeAudio.play(1);}
+      },
+    });
     this.angleCapture=new ScoutAngleCapture(this.markerMaterial,this.camera,
       ()=>this.floorY===null?this.camera.getTransform().getWorldPosition().y-150:this.floorY,
       (seconds,fn)=>{const ev=this.createEvent("DelayedCallbackEvent");ev.bind(fn);ev.reset(seconds);});
@@ -302,12 +331,17 @@ export class ScoutMain extends BaseScriptComponent {
         if(interactor.inputType===InteractorInputType.Mouse && !target && (this.selected!==HAND_KIND||this.pinningPoster) && getTime()-this.lastAction>0.25) this.placeAt(interactor);
       });
     });
+    // Grab-to-move runs first, so a fist that closes this frame claims it before a pinch can place.
+    if(this.hovered&&!isNull(this.hovered))this.hoverSeen={root:this.hovered,time:getTime()};
+    this.grabMove.update();
     // Hand pinch remains available in empty space even when SIK has no direct target.
     (["left","right"] as const).forEach((side,index)=>{
       const hand=HandInputData.getInstance().getHand(side);
       const down=hand.isPinching();
       const interactor=all.find(i=>i.inputType===(index===0?InteractorInputType.LeftHand:InteractorInputType.RightHand));
-      if(down&&!this.pinched[index]&&!interactor?.currentInteractable&&(this.selected!==HAND_KIND||this.pinningPoster)&&getTime()-this.lastAction>0.25){
+      // A closing fist often reads as a pinch too; with the other fingers curled it's a grab, not a place.
+      const fistLike=(fingerCurl(hand)??2)<PINCH_IS_FIST;
+      if(down&&!this.pinched[index]&&!fistLike&&!this.grabMove.holding&&!interactor?.currentInteractable&&(this.selected!==HAND_KIND||this.pinningPoster)&&getTime()-this.lastAction>0.25){
         this.placeAt(interactor);
       }
       this.pinched[index]=down;
@@ -534,8 +568,18 @@ export class ScoutMain extends BaseScriptComponent {
     so.enabled=false;
     this.hoverHalo=so;this.hoverHaloImage=img;
   }
+  /** Pinch-drag moves props only with the Hand tool selected (see makeMarker). */
+  private applyDragMode():void {
+    this.placed.forEach(root=>{if(!isNull(root)&&root!==this.grabMove.holding)this.setCanDrag(root,this.selected===HAND_KIND);});
+  }
+  private setCanDrag(root:SceneObject,can:boolean):void {
+    const m=root.getComponent(InteractableManipulation.getTypeName()) as InteractableManipulation;
+    if(m)m.setCanTranslate(can);
+  }
   private updateHoverHalo():void {
-    const target=this.hovered&&!isNull(this.hovered)&&this.placed.indexOf(this.hovered)>=0?this.hovered:null;
+    // A held prop keeps its halo even when the closed hand's ray has drifted off it.
+    const held=this.grabMove.holding;
+    const target=held?held:this.hovered&&!isNull(this.hovered)&&this.placed.indexOf(this.hovered)>=0?this.hovered:null;
     if(!target)this.hovered=null;
     const goal=target?1:0;
     this.hoverLevel+=(goal-this.hoverLevel)*Math.min(1,getDeltaTime()*HOVER_HALO_EASE);
@@ -759,6 +803,9 @@ export class ScoutMain extends BaseScriptComponent {
     const manipulation=root.createComponent(InteractableManipulation.getTypeName()) as InteractableManipulation;
     manipulation.setCanScale(false);
     manipulation.setCanRotate(false);
+    // Moving is a grab (ScoutGrabMove); a pinch-drag only moves props with the Hand tool selected, so
+    // pinching a prop's buttons and dials can't nudge it by accident.
+    manipulation.setCanTranslate(this.selected===HAND_KIND);
     // Only a real move drops back onto the surface — a tap on a child (dial, badge) can propagate a
     // zero-length translation here, and must not knock a deliberately raised actor back to the floor.
     let grabbedAt:vec3=null;

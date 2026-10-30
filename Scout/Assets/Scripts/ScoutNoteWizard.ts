@@ -7,6 +7,7 @@ import {NoteAssetState, SHOT_TYPE_STEPS, MOVEMENT_STEPS, PHOTO_SHOT_TYPE_STEPS, 
 
 const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
 const EDIT_ICON=requireAsset("../Icons/edit.png") as Texture;
+const ARROW_ICON=requireAsset("../Icons/arrow_forward.png") as Texture;
 
 export type NoteWizardTheme={
   font:Font;
@@ -91,6 +92,7 @@ export class ScoutNoteWizard {
     else if(this.state.step<=2)this.buildStepChoices("Shot Type",shotTypes,i=>this.commit({shotType:i,step:3}));
     else if(this.state.step===3)this.buildStepChoices(this.photo?"Angle":"Movement",this.photo?PHOTO_ANGLE_STEPS:MOVEMENT_STEPS,i=>this.commit({movementType:i,step:4}));
     else this.buildSummary();
+    if(this.state.step>=1&&this.state.step<=3)this.buildBackButton();
     // Step content is rebuilt from scratch on every transition, so the defensive collider sweep (stray
     // BackPlate colliders would otherwise sit in front of a button and block it) must re-run each time
     // too, not just once at construction like the static Camera/Light panels.
@@ -202,6 +204,29 @@ export class ScoutNoteWizard {
       addBackPlateHover(back,redo,this.theme.idleColor);
     });
     this.text(redo,"Edit",new vec3(0,0,0.3),26,8,this.theme.textColor,72);
+  }
+  /** Top-left "Back" on every question step, for a change of mind or a mis-tap. Steps back one question;
+   * from the first question it returns to the finished note if this was an edit, else to "Write note?". */
+  private buildBackButton():void {
+    const step=this.state.step;
+    const finished=this.state.shotType!==null&&this.state.movementType!==null;
+    const target=(step>this.firstStep()?(this.photo&&step===3?2:step-1):(finished?4:0)) as NoteAssetState["step"];
+    const btn=this.obj(this.contentHost,"Back",new vec3(-PANEL_W/2+11,30,0.1));
+    const back=btn.createComponent(BackPlate.getTypeName()) as BackPlate;
+    back.style="simple";back.size=new vec2(17,9);
+    back.onInitialized.add(()=>{
+      this.style(back,this.theme.idleColor,2);
+      back.interactionPlane.enabled=false;
+      back.interactable.onTriggerEnd.add(()=>this.commit({step:target}));
+      addBackPlateHover(back,btn,this.theme.idleColor);
+    });
+    // The forward arrow, mirrored.
+    const iconHost=this.obj(btn,"Icon",new vec3(-4.6,0,0.3));
+    const img=iconHost.createComponent("Component.Image") as Image;
+    img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
+    img.mainPass.baseTex=ARROW_ICON;img.mainPass.baseColor=this.theme.textColor;
+    iconHost.getTransform().setLocalScale(new vec3(-4,4,1));
+    this.text(btn,"Back",new vec3(2.4,0,0.3),11,7,this.theme.textColor,64);
   }
   /** Where "Write note?" / "Edit" start: the shot number on a video shoot, the shot type on a photo shoot. */
   private firstStep():1|2 {return this.photo?2:1;}
