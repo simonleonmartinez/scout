@@ -16,8 +16,12 @@ const VIDEO_ICON=requireAsset("../Icons/videocam.png") as Texture;
 const GLOW=requireAsset("../Icons/hover_glow.png") as Texture;
 const BODY_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 const HEADER_TINT=new vec4(0xc1/255,0xad/255,0xff/255,1);
+const QUESTION="What are you planning?",WELCOME="Welcome to ShotScout";
 
-const BENCH_DISTANCE=140; // cm in front of the user
+// The bench stands where the user confirmed the floor, but never so close that its ~1.8m width spills
+// out of Specs' field of view (nor across the room): cm from the user. Without a confirmed spot (setup
+// skipped) it goes straight ahead at the minimum.
+const BENCH_MIN_DISTANCE=220,BENCH_MAX_DISTANCE=350;
 // Stand-in bench (until a generated workbench model is wired in): top surface height and footprint.
 const BENCH_TOP=85,BENCH_W=150,BENCH_D=64;
 // Gear slots on the bench top, in bench space (+Z toward the user). Kept clear of the console, which
@@ -30,9 +34,25 @@ const GEAR_SLOTS:{key:keyof WorkbenchGear;x:number;z:number;yaw:number}[]=[
   {key:"lens",x:56,z:8,yaw:0},
   {key:"filmReel",x:-56,z:16,yaw:15},
 ];
-// Console: a chunky base with an operator panel tilted up toward the user.
-const CONSOLE_W=64,CONSOLE_H=8,CONSOLE_D=26,CONSOLE_Z=14,PANEL_TILT=30;
-const BUTTON_X=16,CAP_RADIUS=6.5,BEZEL_RADIUS=8.8,PRESS_DEPTH=1.8;
+// Console: a chunky base with an operator panel tilted up toward the user. Wide and deep enough to hold
+// the first-run intro pages at a readable size before the Photo/Video buttons take their place.
+const CONSOLE_W=92,CONSOLE_H=8,CONSOLE_D=34,CONSOLE_Z=14,PANEL_TILT=30;
+const BUTTON_X=22,CAP_RADIUS=6.5,BEZEL_RADIUS=8.8,PRESS_DEPTH=1.8;
+// Keys sit toward the back of the panel (panel space: z runs from 0 at the front edge to -CONSOLE_D).
+const KEY_Z=-CONSOLE_D/2-3;
+// Intro pages on the panel face: text block on the left, the Next key on the right. Sizes are for
+// reading from where the user stands (~1.5m away), so they're large.
+const INTRO_TEXT_X=-13,INTRO_TEXT_W=60,NEXT_KEY_X=31;
+const INTRO_TITLE=190,INTRO_BODY=140;
+const NEXT_COLOR=new vec4(0x8a/255,0x6c/255,0xf0/255,1);
+const NEXT_ICON=requireAsset("../Icons/arrow_forward.png") as Texture;
+const DOT_IDLE=new vec4(0.4,0.4,0.43,1);
+const WHITE=requireAsset("../Textures/white.png") as Texture;
+const POP_SECONDS=0.25;
+// Info key beside the console: cap radius, gap from the console's side, and its "i" size.
+const INFO_RADIUS=3.2,INFO_GAP=3,INFO_GLYPH=150;
+
+export type BenchIntro={cards:{title:string;body:string}[];onDone:()=>void};
 // Styled as film-set kit to sit with the bench model: a matte-black road case (like the bench frame and
 // gear) with brushed-aluminium corner guards and trim (like its drawer pulls), on a gunmetal panel.
 const HOUSING:[number,number,number,number]=[0.1,0.1,0.11,1];
@@ -57,24 +77,133 @@ export class ScoutWorkbench {
 
   constructor(private material:Material,private camera:Camera,private gear:WorkbenchGear,private onChoose:(type:ShootType)=>void){}
 
-  /** Stands the bench on the floor in front of the user, facing them. */
-  show(floorY:number):void {
+  /** Stands the bench on the floor in front of the user, facing them. With `startWithIntro`, the console
+   * first pages through the intro cards and the Photo/Video buttons appear after the last one; either
+   * way a small info key beside the console replays the intro. `spot` is where the user confirmed the
+   * floor; the bench stands there (within BENCH_MIN/MAX_DISTANCE of the user), facing them. */
+  show(floorY:number,intro:BenchIntro,startWithIntro:boolean,spot:vec3=null):void {
     if(this.root&&!isNull(this.root))this.root.destroy();
     this.chosen=false;
     const cam=this.camera.getTransform(),p=cam.getWorldPosition();
     const look=cam.forward.uniformScale(-1);
-    const f=new vec3(look.x,0,look.z).normalize();
+    let f=new vec3(look.x,0,look.z).normalize(),dist=BENCH_MIN_DISTANCE;
+    const toSpot=spot?new vec3(spot.x-p.x,0,spot.z-p.z):null;
+    if(toSpot&&toSpot.length>1){
+      f=toSpot.normalize();
+      dist=Math.min(BENCH_MAX_DISTANCE,Math.max(BENCH_MIN_DISTANCE,toSpot.length));
+    }
     this.root=global.scene.createSceneObject("Workbench");
     const t=this.root.getTransform();
-    t.setWorldPosition(new vec3(p.x+f.x*BENCH_DISTANCE,floorY,p.z+f.z*BENCH_DISTANCE));
+    t.setWorldPosition(new vec3(p.x+f.x*dist,floorY,p.z+f.z*dist));
     // Local +Z toward the user.
     t.setWorldRotation(quat.angleAxis(Math.atan2(-f.x,-f.z),vec3.up()));
     const top=this.buildBench();
     this.buildGear(top);
-    this.buildHeader(top);
+    this.buildHeader(top,startWithIntro?WELCOME:QUESTION);
     const panel=this.buildConsole(top);
-    this.buildButton(panel,-BUTTON_X,"PHOTO SHOOT",PHOTO_ICON,PHOTO_COLOR,"photo");
-    this.buildButton(panel,BUTTON_X,"VIDEO SHOOT",VIDEO_ICON,VIDEO_COLOR,"video");
+    this.info=this.buildInfoKey(top,()=>this.replayIntro(panel,intro));
+    if(startWithIntro)this.startIntro(panel,intro);
+    else this.buildChoice(panel,false);
+  }
+  private header:Text=null;
+  private choice:SceneObject[]=[];
+  private info:SceneObject=null;
+
+  /** The two shoot-type buttons; `pop` grows them in (after the intro) instead of just appearing. */
+  private buildChoice(panel:SceneObject,pop:boolean):void {
+    const choose=(type:ShootType)=>()=>{this.chosen=true;this.onChoose(type);this.hide();};
+    this.choice=[
+      this.buildKey(panel,-BUTTON_X,"PHOTO SHOOT",PHOTO_ICON,PHOTO_COLOR,choose("photo")),
+      this.buildKey(panel,BUTTON_X,"VIDEO SHOOT",VIDEO_ICON,VIDEO_COLOR,choose("video")),
+    ];
+    if(pop)this.choice.forEach(k=>this.popIn(k));
+  }
+  /** Info key → the intro again, in place of the Photo/Video buttons (which come back after Start). */
+  private replayIntro(panel:SceneObject,intro:BenchIntro):void {
+    this.choice.forEach(k=>{if(!isNull(k))k.destroy();});
+    this.choice=[];
+    if(this.header&&!isNull(this.header))this.header.text=WELCOME;
+    this.startIntro(panel,intro);
+  }
+  private startIntro(panel:SceneObject,intro:BenchIntro):void {
+    if(this.info&&!isNull(this.info))this.info.enabled=false;
+    this.buildIntro(panel,intro,0);
+  }
+  /** One intro page flat on the panel face: title and body on the left, page dots under them, and a
+   * Next key on the right (Start on the last page, which swaps in the shoot-type buttons). */
+  private buildIntro(panel:SceneObject,intro:BenchIntro,page:number):void {
+    const host=this.child(panel,"Intro");
+    const card=intro.cards[page],last=page===intro.cards.length-1;
+    this.flatText(host,card.title,new vec3(INTRO_TEXT_X,1.2,-CONSOLE_D+7),INTRO_TEXT_W,9,INTRO_TITLE,HEADER_TINT);
+    this.flatText(host,card.body,new vec3(INTRO_TEXT_X,1.2,-CONSOLE_D/2+1),INTRO_TEXT_W,12,INTRO_BODY,LABEL_INK);
+    intro.cards.forEach((_c,i)=>{
+      const dot=this.image(host,WHITE,new vec3(INTRO_TEXT_X+(i-(intro.cards.length-1)/2)*4.5,1.2,-4),2,2,i===page?HEADER_TINT:DOT_IDLE);
+      dot.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
+    });
+    let pressed=false;
+    const key=this.buildKey(host,NEXT_KEY_X,last?"START":"NEXT",NEXT_ICON,NEXT_COLOR,()=>{
+      if(pressed)return;
+      pressed=true;
+      // Swap pages a beat later: the key's own release animation finishes first, and it isn't destroyed
+      // from inside its own interaction callback.
+      animate({duration:0.12,update:()=>{},ended:()=>{
+        if(isNull(host)||isNull(panel))return;
+        // Disabled now (so SIK's cursor lets go of the key it's on), destroyed a beat later — destroying
+        // the hovered key outright leaves the cursor pointing at a dead object for a few frames.
+        host.enabled=false;
+        animate({duration:0.1,update:()=>{},ended:()=>{if(!isNull(host))host.destroy();}});
+        if(last){
+          intro.onDone();
+          if(this.header&&!isNull(this.header))this.header.text=QUESTION;
+          this.buildChoice(panel,true);
+          if(this.info&&!isNull(this.info)){this.info.enabled=true;this.popIn(this.info);}
+        }else this.buildIntro(panel,intro,page+1);
+      }});
+    });
+    if(page>0)this.popIn(key);
+  }
+  /** A small round purple "i" key on the bench top just right of the console, for anyone curious to
+   * read the intro again. Same press/hover feel as the console keys, a quarter of the size. */
+  private buildInfoKey(top:number,onPress:()=>void):SceneObject {
+    const host=this.child(this.root,"Info key");
+    host.getTransform().setLocalPosition(new vec3(CONSOLE_W/2+INFO_GAP+INFO_RADIUS,top,CONSOLE_Z+CONSOLE_D/2-INFO_RADIUS-2));
+    const bezelB=this.builder();
+    buildLathe(bezelB,[[0,0],[INFO_RADIUS+1,0],[INFO_RADIUS+1,0.8],[INFO_RADIUS+0.2,1.1],[0,1.1]],24,BEZEL);
+    this.visual(this.child(host,"Bezel"),bezelB);
+    const cap=this.child(host,"Cap");
+    const capT=cap.getTransform();
+    const capB=this.builder();
+    const c:[number,number,number,number]=[NEXT_COLOR.x,NEXT_COLOR.y,NEXT_COLOR.z,1];
+    buildLathe(capB,[[0,1.1],[INFO_RADIUS,1.1],[INFO_RADIUS,2.6],[INFO_RADIUS*0.85,3.2],[0,3.4]],24,c);
+    this.visual(cap,capB);
+    // A bold "i", lying on the cap facing up and reading toward the user.
+    const glyph=this.text(cap,"i",new vec3(0,3.5,0),BODY_FONT,INFO_GLYPH,LABEL_INK);
+    glyph.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
+    const collider=cap.createComponent("Physics.ColliderComponent") as ColliderComponent;
+    const shape=Shape.createBoxShape();shape.size=new vec3(INFO_RADIUS*2+2,6,INFO_RADIUS*2+2);collider.shape=shape;
+    const input=cap.createComponent(Interactable.getTypeName()) as Interactable;
+    input.targetingMode=3;
+    addHoverFeedback(input,cap);
+    const press=(down:boolean)=>{
+      const from=capT.getLocalPosition().y,to=down?-1:0;
+      animate({duration:0.08,easing:"ease-out-quad",update:k=>{
+        if(isNull(cap))return;
+        const p=capT.getLocalPosition();capT.setLocalPosition(new vec3(p.x,from+(to-from)*k,p.z));
+      }});
+    };
+    input.onTriggerStart.add(()=>{if(!this.chosen)press(true);});
+    input.onTriggerEnd.add(()=>{press(false);if(!this.chosen&&host.enabled)onPress();});
+    input.onTriggerCanceled.add(()=>press(false));
+    return host;
+  }
+  /** Grows a freshly built key in from nothing. */
+  private popIn(so:SceneObject):void {
+    const t=so.getTransform();
+    t.setLocalScale(vec3.one().uniformScale(0.001));
+    animate({duration:POP_SECONDS,easing:"ease-out-back",update:k=>{
+      if(isNull(so))return;
+      t.setLocalScale(vec3.one().uniformScale(Math.max(0.001,k)));
+    }});
   }
 
   /** The generated bench if there is one, else a plain stand-in. The generated bench carries its gear
@@ -105,14 +234,15 @@ export class ScoutWorkbench {
       mt.setLocalRotation(quat.angleAxis(Math.PI+slot.yaw*Math.PI/180,vec3.up()));
     }
   }
-  /** Mascot + wordmark (same art as the menu header) over "What are you planning?". */
-  private buildHeader(top:number):void {
+  /** Mascot + wordmark (same art as the menu header) over a line of text: a welcome during the intro,
+   * then "What are you planning?". */
+  private buildHeader(top:number,line:string):void {
     const header=this.child(this.root,"Header");
     header.getTransform().setLocalPosition(new vec3(0,top+62,-20));
     const h=18;
     this.image(header,MASCOT,new vec3(-(h*LOGO_ASPECT)/2-2,0,0),h*MASCOT_ASPECT,h,null);
     this.image(header,LOGO,new vec3(h*MASCOT_ASPECT/2+2,0,0),h*LOGO_ASPECT,h,null);
-    this.text(header,"What are you planning?",new vec3(0,-20,0),BODY_FONT,220,HEADER_TINT);
+    this.header=this.text(header,line,new vec3(0,-20,0),BODY_FONT,220,HEADER_TINT);
   }
   /** Returns the tilted panel the buttons mount on (its local +Y is the panel's face). */
   private buildConsole(top:number):SceneObject {
@@ -145,11 +275,12 @@ export class ScoutWorkbench {
     return panel;
   }
   /** A chunky industrial push button: aluminium bezel, soft halo, coloured cap with an icon, and a
-   * label plate. Hover grows the cap and brightens the halo; pressing sinks the cap. */
-  private buildButton(panel:SceneObject,x:number,label:string,icon:Texture,color:vec4,type:ShootType):void {
+   * label plate. Hover grows the cap and brightens the halo; pressing sinks the cap and, on release,
+   * runs `onPress` (once a shoot type is chosen, no key does anything). Returns the key's root. */
+  private buildKey(panel:SceneObject,x:number,label:string,icon:Texture,color:vec4,onPress:()=>void):SceneObject {
     const host=this.child(panel,label);
-    // Buttons toward the back of the panel, labels between them and the front edge.
-    host.getTransform().setLocalPosition(new vec3(x,1,-CONSOLE_D/2-3));
+    // Keys toward the back of the panel, labels between them and the front edge.
+    host.getTransform().setLocalPosition(new vec3(x,1,KEY_Z));
     const bezelB=this.builder();
     buildLathe(bezelB,[[0,0],[BEZEL_RADIUS,0],[BEZEL_RADIUS,1.2],[CAP_RADIUS+0.4,1.6],[0,1.6]],32,BEZEL);
     this.visual(this.child(host,"Bezel"),bezelB);
@@ -188,11 +319,10 @@ export class ScoutWorkbench {
     input.onTriggerEnd.add(()=>{
       press(false);
       if(this.chosen)return;
-      this.chosen=true;
-      this.onChoose(type);
-      this.hide();
+      onPress();
     });
     input.onTriggerCanceled.add(()=>press(false));
+    return host;
   }
   /** Shrinks the whole bench away, then removes it. */
   private hide():void {
@@ -246,6 +376,14 @@ export class ScoutWorkbench {
     t.text=value;t.font=font;t.size=size;t.textFill.color=color;t.depthTest=true;
     t.horizontalAlignment=HorizontalAlignment.Center;t.verticalAlignment=VerticalAlignment.Center;
     t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
+    return t;
+  }
+  /** Wrapped text lying flat on the panel face (reading "up" toward the back of the panel). */
+  private flatText(parent:SceneObject,value:string,pos:vec3,w:number,h:number,size:number,color:vec4):Text {
+    const t=this.text(parent,value,pos,BODY_FONT,size,color);
+    t.horizontalOverflow=HorizontalOverflow.Wrap;
+    t.layoutRect=Rect.create(-w/2,w/2,-h/2,h/2);
+    t.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
     return t;
   }
 }

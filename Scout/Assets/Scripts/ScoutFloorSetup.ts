@@ -29,6 +29,8 @@ export class ScoutFloorSetup {
   private skipped=false;
   /** True once the floor is confirmed or skipped — placement may begin. */
   get done():boolean {return this.confirmedAt!==null||this.skipped;}
+  /** Where on the floor the ring was confirmed (null if setup was skipped or isn't done). */
+  get spot():vec3 {return this.confirmedAt!==null?this.anchor:null;}
   /** After a while without success, a pinch may skip setup (e.g. a floor depth sensing can't see). */
   get canSkip():boolean {return !this.done&&this.started!==null&&getTime()-this.started>SKIP_AFTER;}
 

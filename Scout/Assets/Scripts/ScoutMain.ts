@@ -18,7 +18,7 @@ import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
 import {ScoutWorkbench,ShootType} from "./ScoutWorkbench";
 import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
 import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
-import {ScoutIntro,ScoutTips,IntroCard,Tip} from "./ScoutOnboarding";
+import {ScoutTips,IntroCard,Tip,introSeen,markIntroSeen} from "./ScoutOnboarding";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
@@ -53,7 +53,8 @@ const WorldQuery=require("LensStudio:WorldQueryModule") as WorldQueryModule;
 // How long a pinch waits (green spinner showing) for surface tracking to find the real surface under the
 // aim point before giving up — placement never falls back to a midair position.
 const PLACE_SEARCH_SECONDS=1.5;
-// First-run intro: what ShotScout is, when to use it, why.
+// First-run intro, paged on the bench console before the Photo/Video buttons: what ShotScout is, when to
+// use it, why.
 const INTRO_CARDS:IntroCard[]=[
   {title:"Plan your shoot on location.",body:"Place cameras, lights, actors and shot notes right where they'll go."},
   {title:"Use it on a scout or the day before.",body:"Block every setup in the real space, so shoot day starts with shooting."},
@@ -230,8 +231,7 @@ export class ScoutMain extends BaseScriptComponent {
   // Fist-to-move for placed props, and the last prop the cursor was on (its grab target).
   private grabMove:ScoutGrabMove;
   private hoverSeen:{root:SceneObject;time:number}=null;
-  // Onboarding: intro cards before the bench, then one-time tips as each action becomes useful.
-  private intro:ScoutIntro;
+  // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
 
   onAwake():void {
@@ -305,7 +305,6 @@ export class ScoutMain extends BaseScriptComponent {
     this.palette.onDeleteLayout.add(id=>{this.lastAction=getTime();this.layouts.remove(id);this.palette.setLayouts(this.layouts.list());this.selectAudio.play(1);});
     this.posterGhost=buildPoster(this.markerMaterial,true);this.posterGhost.enabled=false;
     this.palette.onPinPoster.add(()=>{this.lastAction=getTime();this.pending=null;this.pinningPoster=true;this.wallHit=null;});
-    this.intro=new ScoutIntro(this.camera,INTRO_CARDS,(s,fn)=>this.schedule(s,fn),()=>{this.lastAction=getTime();this.selectAudio.play(1);});
     this.tips=new ScoutTips(this.camera,TIPS,(s,fn)=>this.schedule(s,fn));
     this.rebuildPreview();this.refresh();this.ready=true;
     console.log("Scout ready: point at the floor to set it, then choose equipment, notes, or actors.");
@@ -389,9 +388,9 @@ export class ScoutMain extends BaseScriptComponent {
     // it waits (with the "look at the floor" hint) until surface tracking first sees the floor.
     const benchWaiting=this.floorSetup.done&&this.shootType===null&&!this.workbenchShown;
     if(benchWaiting&&this.floorY!==null){
-      // A first-time user reads the intro cards first; the bench follows once they tap Get started.
-      if(this.intro.pending)this.intro.show();
-      else{this.workbenchShown=true;this.workbench.show(this.floorY);}
+      // A first-time user pages through the intro on the bench console before the Photo/Video buttons.
+      this.workbenchShown=true;
+      this.workbench.show(this.floorY,{cards:INTRO_CARDS,onDone:()=>{markIntroSeen();this.lastAction=getTime();}},!introSeen(),this.floorSetup.spot);
     }
     const settingUp=!this.floorSetup.done||(benchWaiting&&!this.workbenchShown)||this.workbench.active;
     this.tips.update();
@@ -713,8 +712,8 @@ export class ScoutMain extends BaseScriptComponent {
       if(this.floorSetup.canSkip){this.lastAction=getTime();this.floorSetup.skip();}
       return;
     }
-    // Nothing is placed before the intro and the bench are done (their own buttons take pinches then).
-    if(this.workbench.active||this.intro.active||this.shootType===null)return;
+    // Nothing is placed before the bench (and its intro) is done: its own keys take pinches then.
+    if(this.workbench.active||this.shootType===null)return;
     if(this.pinningPoster){this.pinPoster();return}
     if(this.placed.length>=this.maxMarkers){this.palette.setHint("Marker limit reached — Undo or Clear All");return}
     if(this.pending)return;
