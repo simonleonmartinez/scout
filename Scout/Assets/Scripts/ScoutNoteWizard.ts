@@ -26,6 +26,9 @@ export type NoteWizardTheme={
 // lets them spill slightly), since that big chunky lettering was the one thing worth keeping.
 const PANEL_W=80,PANEL_H=90;
 const HEADER_H=28;
+// Back badge: diameter, and its height in step-content space — its top sits ~4.5cm below the header
+// band, level with the step title's left end.
+const BACK_SIZE=8,BACK_Y=26;
 // Notepad-only decoration colors, kept out of NoteWizardTheme since nothing else in the project uses
 // a paper look — lavender/grey family throughout, no blue or cyan anywhere in this asset.
 const HEADER_BAND=new vec4(0.74,0.70,0.82,1);
@@ -211,22 +214,23 @@ export class ScoutNoteWizard {
     const step=this.state.step;
     const finished=this.state.shotType!==null&&this.state.movementType!==null;
     const target=(step>this.firstStep()?(this.photo&&step===3?2:step-1):(finished?4:0)) as NoteAssetState["step"];
-    const btn=this.obj(this.contentHost,"Back",new vec3(-PANEL_W/2+11,30,0.1));
+    // A round arrow badge, like the header's Edit/Delete badges, sitting clear of the header band.
+    const btn=this.obj(this.contentHost,"Back",new vec3(-PANEL_W/2+9,BACK_Y,0.1));
     const back=btn.createComponent(BackPlate.getTypeName()) as BackPlate;
-    back.style="simple";back.size=new vec2(17,9);
+    back.style="simple";back.size=new vec2(BACK_SIZE,BACK_SIZE);
     back.onInitialized.add(()=>{
-      this.style(back,this.theme.idleColor,2);
+      this.style(back,this.theme.idleColor,BACK_SIZE/2);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerEnd.add(()=>this.commit({step:target}));
       addBackPlateHover(back,btn,this.theme.idleColor);
     });
-    // The forward arrow, mirrored.
-    const iconHost=this.obj(btn,"Icon",new vec3(-4.6,0,0.3));
+    // The forward arrow turned half a turn (a negative scale would flip it to face away and vanish).
+    const iconHost=this.obj(btn,"Icon",new vec3(0,0,0.4));
     const img=iconHost.createComponent("Component.Image") as Image;
     img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
     img.mainPass.baseTex=ARROW_ICON;img.mainPass.baseColor=this.theme.textColor;
-    iconHost.getTransform().setLocalScale(new vec3(-4,4,1));
-    this.text(btn,"Back",new vec3(2.4,0,0.3),11,7,this.theme.textColor,64);
+    iconHost.getTransform().setLocalScale(new vec3(BACK_SIZE*0.6,BACK_SIZE*0.6,1));
+    iconHost.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.forward()));
   }
   /** Where "Write note?" / "Edit" start: the shot number on a video shoot, the shot type on a photo shoot. */
   private firstStep():1|2 {return this.photo?2:1;}

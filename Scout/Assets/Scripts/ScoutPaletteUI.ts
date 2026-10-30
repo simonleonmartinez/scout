@@ -54,7 +54,7 @@ const NOTE_IDLE_TINT=new vec4(0.64,0.60,0.74,1);
 const NOTE_HOVER_TINT=new vec4(0.72,0.68,0.82,1);
 const NOTE_ACTIVE_TINT=new vec4(0.50,0.42,0.78,1);
 // Camera angle monitor: width (cm), backward tilt (degrees), and its gear-style inks.
-const ANGLE_SCREEN_W=30,ANGLE_SCREEN_TILT=12;
+const ANGLE_SCREEN_W=36,ANGLE_SCREEN_TILT=12;
 const ANGLE_INK=new vec4(0.93,0.88,0.78,1);
 const ANGLE_INK_DIM=new vec4(0.93,0.88,0.78,0.6);
 const ANGLE_SCREEN_OFF=new vec4(0.07,0.07,0.08,1);
@@ -74,7 +74,11 @@ const TOOL_NAMES=["Camera","Light","Notepad","Standing","Seated","Hand"];
 // without an empty-space pinch accidentally dropping a new one. Kept in sync with ScoutMain's own copy.
 const HAND_KIND=5;
 const THEME_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
-const TYPE_SCALE = {Title2:{size:93,weight:700},Body:{size:52,weight:600},Caption:{size:44,weight:500}};
+// Sized for reading in glasses with the menu ~110cm away (and scaled up again by MENU_SCALE): the
+// earlier 93/52/44 read as tiny on device.
+const TYPE_SCALE = {Title2:{size:110,weight:700},Body:{size:72,weight:600},Caption:{size:60,weight:500}};
+// The whole floating menu (panel, buttons, icons, text) is built in cm and then enlarged by this.
+const MENU_SCALE=1.15;
 /** WB/Kelvin dials fill their ring's hole with the color that Kelvin value represents. */
 function kelvinFill(kelvin:number):vec4 {
   const rgb=kelvinToRGB(kelvin);
@@ -150,6 +154,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
    * one. Only needed once a marker is actually placed, well after start(), so no ordering gate is required. */
   setBadgeMaterial(material:Material):void { this.badgeMaterial=material; }
   private build(): void {
+    this.sceneObject.getTransform().setLocalScale(vec3.one().uniformScale(MENU_SCALE));
     this.sceneObject.createComponent("Component.Canvas");
     const back = this.sceneObject.createComponent(BackPlate.getTypeName()) as BackPlate;
     this.back=back;
@@ -482,14 +487,14 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       this.bar(guides,new vec3(cx-sx*arm/2,cy,0),arm,thick,ANGLE_INK);
       this.bar(guides,new vec3(cx,cy-sy*arm/2,0),thick,arm,ANGLE_INK);
     }
-    this.label(guides,photo?"3:2":"16:9",new vec3(-w/2+inset+2.8,h/2-inset-1.6,0),34,ANGLE_INK,HorizontalAlignment.Center);
+    this.label(guides,photo?"3:2":"16:9",new vec3(-w/2+inset+2.8,h/2-inset-1.8,0),52,ANGLE_INK,HorizontalAlignment.Center);
     // Centre prompt: title + one line of guidance, swapped by state.
-    const title=this.label(host,"",new vec3(0,screenY+1.6,0.5),62,ANGLE_INK,HorizontalAlignment.Center);
-    const detail=this.label(host,"",new vec3(0,screenY-2.2,0.5),38,ANGLE_INK_DIM,HorizontalAlignment.Center);
+    const title=this.label(host,"",new vec3(0,screenY+2.6,0.5),90,ANGLE_INK,HorizontalAlignment.Center);
+    const detail=this.label(host,"",new vec3(0,screenY-3.2,0.5),60,ANGLE_INK_DIM,HorizontalAlignment.Center);
     // "Angle changed" banner across the top of a stale photo.
-    const banner=this.obj(host,"Stale banner",new vec3(0,screenY+h/2-2.4,0.5));
-    this.bar(banner,vec3.zero(),w,3.6,ANGLE_STALE_TINT);
-    this.label(banner,"Angle changed · retake",new vec3(0,0,0.1),40,new vec4(0.1,0.08,0.05,1),HorizontalAlignment.Center);
+    const banner=this.obj(host,"Stale banner",new vec3(0,screenY+h/2-3.2,0.5));
+    this.bar(banner,vec3.zero(),w,5.2,ANGLE_STALE_TINT);
+    this.label(banner,"Angle changed · retake",new vec3(0,0,0.1),66,new vec4(0.1,0.08,0.05,1),HorizontalAlignment.Center);
     // Bottom strip: exactly one action button at a time.
     const stripY=-panelH/2+pad+strip/2-0.4;
     const action=(name:string,icon:Texture,bw:number,fn:()=>void)=>{
@@ -512,8 +517,8 @@ export class ScoutPaletteUI extends BaseScriptComponent {
         cancelRow.enabled=state==="guiding";
         retakeRow.enabled=hasPhoto;
         title.getSceneObject().enabled=detail.getSceneObject().enabled=!hasPhoto;
-        if(state==="empty"){title.text="No angle yet";detail.text="Take a reference photo from where this camera stands";}
-        if(state==="guiding"){title.text="Walk to the camera";detail.text="Stand on the marker and face the shot";}
+        if(state==="empty"){title.text="No angle yet";detail.text="Stand where this camera stands\nto take a reference photo";}
+        if(state==="guiding"){title.text="Walk to the camera";detail.text="Stand on the marker\nand face the shot";}
       },
       setStatus:(text:string)=>{title.text=text;},
       setImage:(tex:Texture)=>{image=tex;},

@@ -18,6 +18,7 @@ import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
 import {ScoutWorkbench,ShootType} from "./ScoutWorkbench";
 import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
 import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
+import {ScoutIntro,ScoutTips,IntroCard,Tip} from "./ScoutOnboarding";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
@@ -52,6 +53,22 @@ const WorldQuery=require("LensStudio:WorldQueryModule") as WorldQueryModule;
 // How long a pinch waits (green spinner showing) for surface tracking to find the real surface under the
 // aim point before giving up — placement never falls back to a midair position.
 const PLACE_SEARCH_SECONDS=1.5;
+// First-run intro: what ShotScout is, when to use it, why.
+const INTRO_CARDS:IntroCard[]=[
+  {title:"Plan your shoot on location.",body:"Place cameras, lights, actors and shot notes right where they'll go."},
+  {title:"Use it on a scout or the day before.",body:"Block every setup in the real space, so shoot day starts with shooting."},
+  {title:"Save it for later.",body:"Come back with your crew and your plan is waiting where you left it."},
+];
+// One-time tips, each shown the first time its action becomes useful (see the tips.show calls).
+const TIPS:{[id:string]:Tip}={
+  place:{title:"Point and pinch",body:"to drop it on the floor.",icon:requireAsset("../Icons/arrow_forward.png") as Texture},
+  grab:{title:"Grab it like a real object.",body:"Close your hand to pick it up, open to put it down.",icon:requireAsset("../Icons/pan_tool.png") as Texture},
+  edit:{title:"Need it exact?",body:"Tap the pencil for arrows and a rotate ring.",icon:requireAsset("../Icons/edit.png") as Texture},
+  dials:{title:"Twist the dials",body:"like you would on set.",icon:requireAsset("../Icons/rotate_right.png") as Texture},
+  note:{title:"Leave yourself a note",body:"for this angle.",icon:requireAsset("../Icons/sticky_note_2.png") as Texture},
+  capture:{title:"See what it sees.",body:"Walk to the camera to grab a reference shot.",icon:requireAsset("../Icons/photo_camera.png") as Texture},
+  save:{title:"Happy with it? Save it",body:"so it's here next time.",icon:requireAsset("../Icons/bookmarks.png") as Texture},
+};
 // A fist grabs the prop hovered up to this long ago (s) — the targeting ray drifts as the hand closes.
 // Also how recent a queued placement must be for a starting grab to cancel it as the fist's own pinch.
 const GRAB_TARGET_GRACE=0.35;
@@ -213,6 +230,9 @@ export class ScoutMain extends BaseScriptComponent {
   // Fist-to-move for placed props, and the last prop the cursor was on (its grab target).
   private grabMove:ScoutGrabMove;
   private hoverSeen:{root:SceneObject;time:number}=null;
+  // Onboarding: intro cards before the bench, then one-time tips as each action becomes useful.
+  private intro:ScoutIntro;
+  private tips:ScoutTips;
 
   onAwake():void {
     this.createEvent("OnStartEvent").bind(()=>this.start());
@@ -265,11 +285,12 @@ export class ScoutMain extends BaseScriptComponent {
         if(this.pending&&getTime()-this.pending.started<GRAB_TARGET_GRACE)this.pending=null;
         this.setCanDrag(root,false);
         this.selectAudio.play(1);
+        this.tips.done("grab");
       },
       onEnd:(root,moved)=>{
         this.lastAction=getTime();
         this.setCanDrag(root,this.selected===HAND_KIND);
-        if(moved){this.settleOnSurface(root);this.placeAudio.play(1);}
+        if(moved){this.settleOnSurface(root);this.placeAudio.play(1);this.tips.show("edit");}
       },
     });
     this.angleCapture=new ScoutAngleCapture(this.markerMaterial,this.camera,
@@ -284,8 +305,13 @@ export class ScoutMain extends BaseScriptComponent {
     this.palette.onDeleteLayout.add(id=>{this.lastAction=getTime();this.layouts.remove(id);this.palette.setLayouts(this.layouts.list());this.selectAudio.play(1);});
     this.posterGhost=buildPoster(this.markerMaterial,true);this.posterGhost.enabled=false;
     this.palette.onPinPoster.add(()=>{this.lastAction=getTime();this.pending=null;this.pinningPoster=true;this.wallHit=null;});
+    this.intro=new ScoutIntro(this.camera,INTRO_CARDS,(s,fn)=>this.schedule(s,fn),()=>{this.lastAction=getTime();this.selectAudio.play(1);});
+    this.tips=new ScoutTips(this.camera,TIPS,(s,fn)=>this.schedule(s,fn));
     this.rebuildPreview();this.refresh();this.ready=true;
     console.log("Scout ready: point at the floor to set it, then choose equipment, notes, or actors.");
+  }
+  private schedule(seconds:number,fn:()=>void):void {
+    const ev=this.createEvent("DelayedCallbackEvent");ev.bind(fn);ev.reset(seconds);
   }
   private audio(track:AudioTrackAsset):AudioComponent {
     const audio=this.sceneObject.createComponent("Component.AudioComponent") as AudioComponent;
@@ -332,7 +358,7 @@ export class ScoutMain extends BaseScriptComponent {
       });
     });
     // Grab-to-move runs first, so a fist that closes this frame claims it before a pinch can place.
-    if(this.hovered&&!isNull(this.hovered))this.hoverSeen={root:this.hovered,time:getTime()};
+    if(this.hovered&&!isNull(this.hovered)){this.hoverSeen={root:this.hovered,time:getTime()};this.tips.show("grab");}
     this.grabMove.update();
     // Hand pinch remains available in empty space even when SIK has no direct target.
     (["left","right"] as const).forEach((side,index)=>{
@@ -363,10 +389,12 @@ export class ScoutMain extends BaseScriptComponent {
     // it waits (with the "look at the floor" hint) until surface tracking first sees the floor.
     const benchWaiting=this.floorSetup.done&&this.shootType===null&&!this.workbenchShown;
     if(benchWaiting&&this.floorY!==null){
-      this.workbenchShown=true;
-      this.workbench.show(this.floorY);
+      // A first-time user reads the intro cards first; the bench follows once they tap Get started.
+      if(this.intro.pending)this.intro.show();
+      else{this.workbenchShown=true;this.workbench.show(this.floorY);}
     }
     const settingUp=!this.floorSetup.done||(benchWaiting&&!this.workbenchShown)||this.workbench.active;
+    this.tips.update();
     if(this.paletteShown===settingUp){this.paletteShown=!settingUp;this.palette.sceneObject.enabled=!settingUp;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
@@ -375,7 +403,7 @@ export class ScoutMain extends BaseScriptComponent {
       this.placementPreview.enabled=false;
       this.updateGroundIndicator(false,aim);
       this.updatePosterGhost(ray,aim);
-      this.updatePlacementFeedback(benchWaiting&&!this.workbenchShown,ray,aim);
+      this.updatePlacementFeedback(benchWaiting&&!this.workbenchShown&&this.floorY===null,ray,aim);
       return;
     }
     this.posterGhost.enabled=false;
@@ -685,7 +713,8 @@ export class ScoutMain extends BaseScriptComponent {
       if(this.floorSetup.canSkip){this.lastAction=getTime();this.floorSetup.skip();}
       return;
     }
-    if(this.workbench.active)return;
+    // Nothing is placed before the intro and the bench are done (their own buttons take pinches then).
+    if(this.workbench.active||this.intro.active||this.shootType===null)return;
     if(this.pinningPoster){this.pinPoster();return}
     if(this.placed.length>=this.maxMarkers){this.palette.setHint("Marker limit reached — Undo or Clear All");return}
     if(this.pending)return;
@@ -711,6 +740,11 @@ export class ScoutMain extends BaseScriptComponent {
     if(kind===1)this.tiltKeyLight(root);
     this.placeAudio.play(1);this.refresh();
     console.log("Scout placed "+label);
+    this.tips.done("place");
+    if(kind===0||kind===1)this.tips.show("dials");
+    if(kind===0)this.tips.show("capture");
+    if(kind===2)this.tips.show("note");
+    if(this.placed.length>=3)this.tips.show("save");
   }
   /** Angles the key light down toward eye level for a typically-shorter seated/standing subject.
    * Must run after root's final camera-facing rotation is set (spawnMarker/restore) — computing this
@@ -772,7 +806,7 @@ export class ScoutMain extends BaseScriptComponent {
       const photo=this.shootType==="photo";
       let rec:AngleCameraRecord=null;
       const screen=this.palette.buildAngleScreen(root,labelY,photo,
-        ()=>{this.lastAction=getTime();if(rec)this.angleCapture.start(rec);},
+        ()=>{this.lastAction=getTime();this.tips.done("capture");if(rec)this.angleCapture.start(rec);},
         ()=>{this.lastAction=getTime();this.angleCapture.cancel();});
       if(screen)rec=this.angleCapture.register(root,screen,photo);
     }
@@ -788,7 +822,11 @@ export class ScoutMain extends BaseScriptComponent {
     col.shape=shape;col.debugDrawEnabled=this.debugColliders;
     const interactable=root.createComponent(Interactable.getTypeName()) as Interactable;
     interactable.targetingMode=3;
-    interactable.onTriggerStart.add(()=>{this.lastAction=getTime();});
+    interactable.onTriggerStart.add(e=>{
+      this.lastAction=getTime();
+      // Pinching the prop itself (not its buttons) is the old way to move it: point to the fist instead.
+      if(e.target===interactable&&this.selected!==HAND_KIND)this.tips.nudge("grab");
+    });
     // The floor halo and the grow below track the prop itself, not the label/dials floating above it,
     // whose hover SIK bubbles up to this interactable too.
     const onProp=(e:{target:Interactable})=>{      if(e.target===interactable)this.hovered=root;
@@ -894,6 +932,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.lastAction=getTime();
     const idx=this.placed.indexOf(root);
     if(idx<0)return;
+    this.tips.done("edit");
     if(this.gizmo.isEditing(root)){this.gizmo.select(null);this.editing=null;return}
     this.editing=root;
     const allowVertical=this.kinds[idx]===3||this.kinds[idx]===4;
@@ -929,6 +968,7 @@ export class ScoutMain extends BaseScriptComponent {
   private chooseShoot(type:ShootType):void {
     this.shootType=type;this.lastAction=getTime();
     this.palette.setShootType(type);this.placeAudio.play(1);
+    this.tips.show("place");
     console.log("Scout shoot type: "+type);
   }
   /** While pinning: a dimmed poster follows the wall under the cursor, or a hint asks for a wall. */
@@ -995,6 +1035,7 @@ export class ScoutMain extends BaseScriptComponent {
    * (if it never opens — e.g. in Lens Studio's preview — the layout simply stays Untitled). */
   private saveLayout():void {
     this.lastAction=getTime();
+    this.tips.done("save");
     if(this.layouts.list().length>=MAX_SAVED_LAYOUTS){this.showHint("Delete a saved layout to make room");this.selectAudio.play(1);return}
     if(!this.placed.length&&!this.posters.length){this.showHint("Place something before saving");this.selectAudio.play(1);return}
     const frame=this.userFrame(),floor=frame.origin.y;

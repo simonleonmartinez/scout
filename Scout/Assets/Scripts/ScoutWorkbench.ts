@@ -165,10 +165,10 @@ export class ScoutWorkbench {
     iconImg.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
     // Cream lettering on a dark plate, like the labels on the gear.
     const plateB=this.builder(),plateIx:number[]=[];
-    addBox(plateB,plateIx,0,0.2,BEZEL_RADIUS+4.5,BEZEL_RADIUS+1.5,0.15,2.4,LABEL_PLATE,0);
+    addBox(plateB,plateIx,0,0.2,BEZEL_RADIUS+5,BEZEL_RADIUS+4.5,0.15,3.4,LABEL_PLATE,0);
     plateB.appendIndices(plateIx);
     this.visual(this.child(host,"LabelPlate"),plateB);
-    const labelText=this.text(host,label,new vec3(0,0.4,BEZEL_RADIUS+4.5),BODY_FONT,80,LABEL_INK);
+    const labelText=this.text(host,label,new vec3(0,0.4,BEZEL_RADIUS+5),BODY_FONT,130,LABEL_INK);
     labelText.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
     const collider=cap.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();shape.size=new vec3(BEZEL_RADIUS*2,8,BEZEL_RADIUS*2);collider.shape=shape;

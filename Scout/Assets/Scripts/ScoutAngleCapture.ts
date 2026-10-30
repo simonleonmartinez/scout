@@ -158,7 +158,7 @@ export class ScoutAngleCapture {
     const textSo=global.scene.createSceneObject("Hint");textSo.setParent(so);
     textSo.getTransform().setLocalPosition(new vec3(0,-HUD_RADIUS-2.2,0));
     const t=textSo.createComponent("Component.Text") as Text;
-    t.font=FONT;t.size=48;t.textFill.color=HINT_COLOR;t.depthTest=false;
+    t.font=FONT;t.size=96;t.textFill.color=HINT_COLOR;t.depthTest=false;
     t.horizontalAlignment=HorizontalAlignment.Center;t.verticalAlignment=VerticalAlignment.Center;
     t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
     this.hint=t;

@@ -52,7 +52,7 @@ export class ScoutRotaryDial {
     this.tubeRadius=radius*0.25;
     this.root=this.obj(parent,"Dial",pos);
     const outer=this.ringRadius+this.tubeRadius;
-    this.text(this.root,config.label,new vec3(0,outer+3.4,0.2),outer*2+6,2.2,theme.textColor,46);
+    this.text(this.root,config.label,new vec3(0,outer+3.4,0.2),outer*2+6,2.2,theme.textColor,70);
     this.buildTicks();
     this.buildRing();
     if(config.fillColorForValue)this.buildFill();
@@ -63,7 +63,7 @@ export class ScoutRotaryDial {
     // instead — blackbody colors are never dark enough themselves to make dark text unreadable.
     const holeDiameter=(this.ringRadius-this.tubeRadius)*2;
     const valueColor=config.fillColorForValue?new vec4(0.08,0.08,0.09,1):theme.textColor;
-    this.valueText=this.text(this.root,"",new vec3(0,0,this.tubeRadius+0.15),holeDiameter*0.92,holeDiameter*0.6,valueColor,42);
+    this.valueText=this.text(this.root,"",new vec3(0,0,this.tubeRadius+0.15),holeDiameter*0.92,holeDiameter*0.6,valueColor,56);
     this.updateValueText();
     this.refreshFill();
   }
