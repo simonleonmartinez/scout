@@ -1,5 +1,6 @@
 import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
 import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
+import {addBackPlateHover} from "./ScoutHover";
 
 const FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 // Brand inks: lavender titles (as in the bench header), cream body text, on a dark gear-grey panel.
@@ -9,8 +10,11 @@ const PANEL_TINT=new vec4(0.1,0.1,0.11,1);
 
 // Text sizes are set for reading in glasses, not on a monitor: at these distances the cap height is
 // roughly 2-3cm. Nothing here goes below TIP_BODY.
-const TIP_DISTANCE=70,TIP_DROP=20,TIP_W=66,TIP_H=22;
+// A tip sits well out in front, a little below eye line — at 70cm it filled half the view. TIP_SCALE
+// enlarges it slightly so text stays readable out there (~38° wide); layout below is in unscaled cm.
+const TIP_DISTANCE=110,TIP_DROP=30,TIP_SCALE=1.15,TIP_W=66,TIP_H=22;
 const TIP_TITLE=150,TIP_BODY=110;
+const CLOSE_SIZE=6;
 const TIP_SECONDS=7,TIP_FOLLOW=3;
 // v2: the intro moved onto the bench, so it shows once more for anyone who saw the old cards.
 const INTRO_KEY="scout.intro.v2.seen",TIPS_KEY="scout.tips.seen";
@@ -71,9 +75,15 @@ export class ScoutTips {
     this.markSeen(id);
     const root=global.scene.createSceneObject("Tip "+id);
     placeInView(root,this.camera,TIP_DISTANCE,TIP_DROP);
+    root.getTransform().setLocalScale(vec3.one().uniformScale(TIP_SCALE));
     root.createComponent("Component.Canvas");
     panel(root,TIP_W,TIP_H,PANEL_TINT,3);
-    const textX=tip.icon?5:0,textW=TIP_W-(tip.icon?16:6);
+    // Round × in the top-right corner: dismisses this tip for good.
+    closeButton(child(root,CLOSE_NAME,new vec3(TIP_W/2-CLOSE_SIZE/2-1.5,TIP_H/2-CLOSE_SIZE/2-1.5,0.6)),()=>{
+      if(this.current?.root===root)this.hide();
+    });
+    // Text between the icon (left) and the close button (right).
+    const textX=tip.icon?2:-3,textW=TIP_W-(tip.icon?16:6)-CLOSE_SIZE;
     if(tip.icon){
       const icon=child(root,"Icon",new vec3(-TIP_W/2+7,0,0.5));
       image(icon,tip.icon,9,9,TITLE_INK);
@@ -150,12 +160,28 @@ function image(so:SceneObject,tex:Texture,w:number,h:number,tint:vec4):void {
   const img=so.createComponent("Component.Image") as Image;
   img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();img.mainPass.baseTex=tex;img.mainPass.baseColor=tint;
 }
-/** A tip is read-only: the BackPlate's own collider would otherwise catch pinches (and hover) meant for
- * whatever is behind it. */
+const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
+const CLOSE_NAME="Close";
+const CLOSE_TINT=new vec4(0x3e/255,0x30/255,0x82/255,1);
+/** A small round × button (BackPlate circle with the close icon) that calls `onTap`. */
+function closeButton(so:SceneObject,onTap:()=>void):void {
+  const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
+  back.style="simple";back.size=new vec2(CLOSE_SIZE,CLOSE_SIZE);
+  back.onInitialized.add(()=>{
+    styleBack(back,CLOSE_TINT,CLOSE_SIZE/2);
+    back.interactionPlane.enabled=false;
+    back.interactable.onTriggerEnd.add(()=>onTap());
+    addBackPlateHover(back,so,CLOSE_TINT);
+  });
+  const icon=child(so,"Icon",new vec3(0,0,0.3));
+  image(icon,CLOSE_ICON,CLOSE_SIZE*0.55,CLOSE_SIZE*0.55,BODY_INK);
+}
+/** The rest of a tip is read-only: the panel's own collider would otherwise catch pinches (and hover)
+ * meant for whatever is behind it. The close button keeps its collider. */
 function sweepColliders(root:SceneObject,schedule:(seconds:number,fn:()=>void)=>void):void {
   schedule(0.1,()=>{
     const visit=(node:SceneObject)=>{
-      if(isNull(node))return;
+      if(isNull(node)||node.name===CLOSE_NAME)return;
       node.getComponents("Physics.ColliderComponent").forEach(c=>c.enabled=false);
       for(let i=0;i<node.getChildrenCount();i++)visit(node.getChild(i));
     };visit(root);
