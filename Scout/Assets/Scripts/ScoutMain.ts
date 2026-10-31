@@ -93,6 +93,15 @@ const HINT_COLOR=new vec4(0.75,1,0.8,1);
 const HINT_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 const HOVER_HALO=requireAsset("../Icons/hover_glow.png") as Texture;
 const HOVER_HALO_ALPHA=0.55,HOVER_HALO_EASE=12;
+// A marker's floating UI (built by ScoutPaletteUI / ScoutNoteWizard under these names) turns to face the
+// user once they've walked FACING_DEADZONE (radians) round the prop, easing over at FACING_EASE per second.
+const FACING_UI=["Marker label","Asset controls","Angle screen","Note wizard"];
+const FACING_DEADZONE=25*Math.PI/180,FACING_EASE=5;
+function wrapAngle(a:number):number {
+  while(a>Math.PI)a-=2*Math.PI;
+  while(a<-Math.PI)a+=2*Math.PI;
+  return a;
+}
 // Hovered props grow by less than buttons do: on a person-sized model even 5% is clearly visible.
 const MARKER_HOVER_SCALE=1.05;
 // Voice naming: how long a pause ends the name, and a cap in case nothing is ever said.
@@ -231,6 +240,8 @@ export class ScoutMain extends BaseScriptComponent {
   // Fist-to-move for placed props, and the last prop the cursor was on (its grab target).
   private grabMove:ScoutGrabMove;
   private hoverSeen:{root:SceneObject;time:number}=null;
+  // Each marker's floating UI pivot, turned to face the user (angle/target in radians about +Y).
+  private facingUI:{root:SceneObject;pivot:SceneObject;facing:vec3;angle:number;target:number}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
 
@@ -425,6 +436,42 @@ export class ScoutMain extends BaseScriptComponent {
     this.updateListening();
     this.keepAboveFloor();
     this.updateHoverHalo();
+    this.updateFacingUI();
+  }
+  /** Moves a fresh marker's floating UI (name tag + badges, dials, angle monitor, note panel) under one
+   * pivot that turns about the prop's vertical axis to face the user — see updateFacingUI. Each piece
+   * keeps its authored layout; `facing` is the side they were authored to face, in root space. */
+  private groupFacingUI(root:SceneObject):void {
+    const pivot=global.scene.createSceneObject("Facing UI");pivot.setParent(root);
+    let facing:vec3=null;
+    for(let i=root.getChildrenCount()-1;i>=0;i--){
+      const c=root.getChild(i);
+      if(FACING_UI.indexOf(c.name)<0)continue;
+      if(!facing){
+        const f=c.getTransform().getLocalRotation().multiplyVec3(vec3.forward());
+        facing=new vec3(f.x,0,f.z).length>1e-3?new vec3(f.x,0,f.z).normalize():vec3.forward();
+      }
+      c.setParentPreserveWorldTransform(pivot);
+    }
+    if(facing)this.facingUI.push({root,pivot,facing,angle:null,target:0});
+  }
+  /** Swings each marker's UI pivot round to the user's side. It only starts turning once the user is
+   * FACING_DEADZONE off, then eases over, so the panels hold still while a dial is being used. */
+  private updateFacingUI():void {
+    const cam=this.camera.getTransform().getWorldPosition();
+    const k=Math.min(1,getDeltaTime()*FACING_EASE);
+    this.facingUI=this.facingUI.filter(e=>!isNull(e.root)&&!isNull(e.pivot));
+    for(const e of this.facingUI){
+      const rt=e.root.getTransform();
+      const toUser=rt.getInvertedWorldTransform().multiplyDirection(cam.sub(rt.getWorldPosition()));
+      if(new vec2(toUser.x,toUser.z).length<1)continue;
+      // Signed angle about +Y that turns `facing` toward the user, in the marker's own frame.
+      const want=Math.atan2(e.facing.z*toUser.x-e.facing.x*toUser.z,e.facing.x*toUser.x+e.facing.z*toUser.z);
+      if(e.angle===null){e.angle=e.target=want;}
+      else if(Math.abs(wrapAngle(want-e.target))>FACING_DEADZONE)e.target=want;
+      e.angle+=wrapAngle(e.target-e.angle)*k;
+      e.pivot.getTransform().setLocalRotation(quat.angleAxis(e.angle,vec3.up()));
+    }
   }
   private isFlat(result:WorldQueryHitTestResult):boolean {
     return !!result&&result.normal.y>FLAT_NORMAL_Y;
@@ -816,6 +863,7 @@ export class ScoutMain extends BaseScriptComponent {
         if(ref)this.applyLightLook(ref,lightState);
       });
     }
+    this.groupFacingUI(root);
     const col=root.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();shape.size=kind===2?new vec3(14,NOTE_PIN_HEIGHT,14):new vec3(kind>=3?55:70,height,kind>=3?55:70);
     col.shape=shape;col.debugDrawEnabled=this.debugColliders;
