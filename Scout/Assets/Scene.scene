@@ -2683,6 +2683,11 @@
       cameraBodies: !<reference.ObjectPrefab[]>
         - !<reference> 77e13d9b-2ab7-474b-8e9e-cf08eedde933
         - !<reference> 29bee347-d5f3-4093-911d-18cdd936eb7a
+      lightRig: !<reference.ObjectPrefab[]>
+        - !<reference> 52e105b2-d54f-4bb3-9985-f6e0bf0c291f
+        - !<reference> 65e67b45-77ef-487b-a649-41eb65f5a8b9
+        - !<reference> d71b9e85-8d73-4c03-9377-adb736a63c8a
+        - !<reference> 2a55a186-ddb9-4d0a-a659-5d34daec5d5e
       cinemaCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       gimbalPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       lensPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000

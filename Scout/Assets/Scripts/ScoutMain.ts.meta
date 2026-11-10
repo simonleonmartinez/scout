@@ -42,6 +42,7 @@
     gimbalPrefab: false
     lensPrefab: false
     lightPrefab: false
+    lightRig: false
     markerMaterial: false
     markers: false
     maxMarkers: false
@@ -83,6 +84,8 @@
         []
       cameraBodies: !<reference.ObjectPrefab[]>
         []
+      lightRig: !<reference.ObjectPrefab[]>
+        []
       cinemaCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       gimbalPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       lensPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
@@ -112,6 +115,7 @@
     - // @input Asset.ObjectPrefab workbenchPrefab
     - '// @input Asset.ObjectPrefab[] classicRig {"hint":"Camera tripod parts: legs, column, head"}'
     - '// @input Asset.ObjectPrefab[] cameraBodies {"hint":"Camera bodies: cinema, photo"}'
+    - '// @input Asset.ObjectPrefab[] lightRig {"hint":"Light stand parts: base, pole, upper pole, softbox head"}'
     - // @input Asset.ObjectPrefab cinemaCameraPrefab
     - // @input Asset.ObjectPrefab gimbalPrefab
     - // @input Asset.ObjectPrefab lensPrefab

@@ -1,0 +1,3 @@
+newmtl LightRig
+Kd 1 1 1
+map_Kd LightRig.jpg

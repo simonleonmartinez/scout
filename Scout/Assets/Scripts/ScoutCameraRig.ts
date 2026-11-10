@@ -41,7 +41,15 @@ const WHEEL:{[k in BodyKind]:{center:vec3;radius:number}}={
 
 /** A Camera prop's rig: builds the parts under `parent` (feet at its origin), raises the column and
  * tilts the head. */
-export class CameraRig {
+/** What the tilt wheel needs from a rig: the part that tilts (the wheel hangs off it, turning about its
+ * local Z), where the wheel goes, and the tilt itself. */
+export interface TiltRig {
+  readonly tilting:SceneObject;
+  readonly wheel:{center:vec3;radius:number};
+  readonly tiltAngle:number;
+}
+
+export class CameraRig implements TiltRig {
   private column:SceneObject;
   private tilt:SceneObject;
   private bodyObject:SceneObject=null;
@@ -96,6 +104,70 @@ export class CameraRig {
   }
 }
 
+// Light: the original light model cut into base / stretching pole / upper pole / softbox head
+// (Assets/GeneratedMeshes/LightRig), in cm with feet at y=0. The pole runs up behind the softbox to its
+// mount at ~137 cm (off the model's origin); only the head tilts, at that joint.
+const LIGHT_POLE_BOTTOM=60,LIGHT_POLE_TOP=99;
+const LIGHT_PIVOT=new vec3(6.6,137,-8);
+/** GLB units -> cm for the original Light.glb (its key-light bulb offset is in GLB units). */
+export const LIGHT_MODEL_SCALE=549.8;
+// The tilt node is turned so its Z is the head's tilt axis (the model's -X): the softbox shines along +Z,
+// and a positive turn about -X raises it, matching the camera's "positive is up".
+const LIGHT_TILT_BASE=quat.angleAxis(-Math.PI/2,vec3.up());
+// Wheel on the light's left (+X when facing its beam), at the joint, just past the softbox's edge so it
+// isn't hidden behind it.
+const LIGHT_WHEEL={center:new vec3(0,0,-35),radius:6};
+
+/** A Light prop's rig: base and stretching pole, with the softbox head tilting on top. `frame` is a
+ * GLB-unit frame that moves with the head, for the real-time light and its glow. */
+export class LightRig implements TiltRig {
+  readonly frame:SceneObject;
+  readonly wheel=LIGHT_WHEEL;
+  private pole:SceneObject;
+  private poleTop:SceneObject;
+  private tilt:SceneObject;
+  private liftCm=0;
+  private tiltDeg=0;
+  /** `prefabs` = [base, pole, upper pole, head]. */
+  constructor(parent:SceneObject,prefabs:ObjectPrefab[],lift:number,tilt=0){
+    // Base first: the marker code measures the prop's feet from the first mesh it finds.
+    const [base,pole,poleTop,head]=prefabs.map(p=>p?p.instantiate(parent):null);
+    if(base)base.name="Light base";
+    this.pole=pole;this.poleTop=poleTop;
+    this.tilt=global.scene.createSceneObject("Tilt");this.tilt.setParent(parent);
+    // Children of the tilt node sit back where they were: undo its base turn and its pivot offset.
+    const undo=LIGHT_TILT_BASE.invert(),offset=undo.multiplyVec3(LIGHT_PIVOT.uniformScale(-1));
+    if(head){head.setParent(this.tilt);head.getTransform().setLocalRotation(undo);head.getTransform().setLocalPosition(offset);}
+    this.frame=global.scene.createSceneObject("Light frame");this.frame.setParent(this.tilt);
+    const ft=this.frame.getTransform();
+    ft.setLocalRotation(undo);ft.setLocalPosition(offset);ft.setLocalScale(vec3.one().uniformScale(LIGHT_MODEL_SCALE));
+    this.setLift(lift);
+    this.setTilt(tilt);
+  }
+  get lift():number {return this.liftCm;}
+  get tiltAngle():number {return this.tiltDeg;}
+  get tilting():SceneObject {return this.tilt;}
+  /** Raises the pole by `cm` (clamped to 0..MAX_LIFT); the head rides on top. */
+  setLift(cm:number):void {
+    this.liftCm=Math.max(0,Math.min(MAX_LIFT,cm));
+    const c=this.liftCm;
+    if(this.pole&&!isNull(this.pole)){
+      const s=(LIGHT_POLE_TOP-LIGHT_POLE_BOTTOM+c)/(LIGHT_POLE_TOP-LIGHT_POLE_BOTTOM);
+      const t=this.pole.getTransform();
+      t.setLocalScale(new vec3(1,s,1));
+      t.setLocalPosition(new vec3(0,LIGHT_POLE_BOTTOM*(1-s),0));
+    }
+    // The upper pole rides up with the stretch; the head (on the tilt node) rides on top of it.
+    if(this.poleTop&&!isNull(this.poleTop))this.poleTop.getTransform().setLocalPosition(new vec3(0,c,0));
+    this.tilt.getTransform().setLocalPosition(LIGHT_PIVOT.add(new vec3(0,c,0)));
+  }
+  /** Tilts the softbox: positive aims it up. */
+  setTilt(deg:number):void {
+    this.tiltDeg=Math.max(-MAX_TILT,Math.min(MAX_TILT,deg));
+    this.tilt.getTransform().setLocalRotation(LIGHT_TILT_BASE.multiply(quat.angleAxis(this.tiltDeg*Math.PI/180,vec3.forward())));
+  }
+}
+
 const GREEN:[number,number,number,number]=[.15,1,.3,1];
 const WHEEL_TUBE=0.9,WHEEL_ARCS=12;
 // Below this |view . axis| the wheel is seen edge-on, and dragging along the rim stands in for turning it.
@@ -108,7 +180,7 @@ export class TiltWheel {
   readonly root:SceneObject;
   private drag:{interactor:Interactor;center:vec3;axis:vec3;view:vec3;edge:boolean;direct:boolean;
     previous:vec3;startTilt:number;angle:number}=null;
-  constructor(private rig:CameraRig,material:Material,private camera:Camera,private set:(deg:number)=>void,private touched:()=>void){
+  constructor(private rig:TiltRig,material:Material,private camera:Camera,private set:(deg:number)=>void,private touched:()=>void){
     this.root=child(rig.tilting,"Tilt wheel",vec3.zero());
     this.rebuild(material);
     this.root.enabled=false;
@@ -217,7 +289,7 @@ export class HeightSlider {
   private knob:SceneObject;
   private drag:{interactor:Interactor;startY:number;startLift:number;normal:vec3;origin:vec3;direct:boolean}=null;
   constructor(parent:SceneObject,pos:vec3,private camera:Camera,private get:()=>number,private set:(cm:number)=>void,
-    private touched:()=>void,body:BodyKind,pickBody:(kind:BodyKind)=>void){
+    private touched:()=>void,body?:BodyKind,pickBody?:(kind:BodyKind)=>void){
     this.root=child(parent,"Height slider",pos);
     const track=child(this.root,"Track",vec3.zero());
     panel(track,TRACK_W,TRACK_H,GLASS,TRACK_W/2);
@@ -255,7 +327,8 @@ export class HeightSlider {
     });
     const end=()=>{if(this.drag){this.drag=null;this.touched();}};
     input.onTriggerEnd.add(end);input.onTriggerEndOutside.add(end);input.onTriggerCanceled.add(end);
-    this.buildPicker(body,pickBody);
+    // Only cameras have more than one body to pick from.
+    if(body&&pickBody)this.buildPicker(body,pickBody);
     this.refresh();
     this.root.enabled=false;
   }

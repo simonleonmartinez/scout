@@ -1,0 +1,95 @@
+- !<AssetImportMetadata/88b1e2f9-f08d-4fbd-8966-8cf0b8579d3a>
+  ImportedAssetIds:
+    .hidden/LightRig: !<reference> cdde4cf9-b71c-4ff6-ba2d-da2fe5e4e91f
+    .hidden/white: !<reference> ace38895-286c-4f21-9442-1091e4a89709
+    26ba073d67b9d0dd: !<reference> 764e33c1-26af-4756-b3b7-ef87e0323552
+    6681b3f8f8f5ede3: !<reference> bb00fe12-97ab-48ac-934b-cb9d1f1a417d
+    Materials/LightRig: !<reference> 7ded7370-47ee-4c66-a57c-886c54176440
+    Materials/LightRig|LightRig|GraphPassInfo: !<reference> 448dced5-31e8-451d-a64f-e882ff24dcb5
+    Meshes/Mesh 1: !<reference> b27c1b99-a5b8-46b5-9c92-0717142de2c8
+    Scene: !<reference> 2a55a186-ddb9-4d0a-a659-5d34daec5d5e
+    Textures/LightRig: !<reference> 1d19e7c6-3fb3-4f8d-a0eb-9bf732714e99
+    cb16681e7113a59e: !<reference> 1782ccc1-3718-4367-84e3-d44b17e3ee79
+  ImporterName: ObjImporter
+  PrimaryAsset: !<reference> 2a55a186-ddb9-4d0a-a659-5d34daec5d5e
+  PackageType: LegacyPackage
+  LegacyPackagePolicy: CanBeUnpackedTransparent
+  ExtraData:
+    {}
+  AssetDataMap:
+    Scene: !<own> 29cdee73-98a8-4b08-8eae-6b00f48eea35
+  DependentFiles:
+    - LightRig.jpg
+    - LightRig.mtl
+  ImporterSettings: !<D3FileImporterSettingsBase>
+    UseLegacyImporter: false
+    WithMaterials: true
+    NamingConvention: ByCategorySanitizeV2
+    PersistentIdGenerationAlgorithm: DescriptorBasedV2
+  CompressionSettings: !<ComplexCompressionSettings>
+    Presets:
+      Performance Compression: !<PerformanceCompressionSettings>
+        Level: Medium
+        Mipmap: false
+      None Compression: !<FileCompressionSettings>
+        {}
+    ExtensionMappings:
+      jpg: Performance Compression
+      mesh: None Compression
+    Overrides:
+      {}
+- !<RenderMeshVisual/1782ccc1-3718-4367-7b1c-2bb4e81c1186>
+  PrefabRemaps:
+    []
+  Name: component_0
+  Enabled: true
+  RenderOrder: 0
+  StretchMode: Stretch
+  VerticalAlignment: Center
+  HorizontalAlignment: Center
+  MeshShadowMode: None
+  ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+  ShadowDensity: 1.000000
+  Materials:
+    - !<reference> 7ded7370-47ee-4c66-a57c-886c54176440
+  Mesh: !<reference> b27c1b99-a5b8-46b5-9c92-0717142de2c8
+  Skin: !<reference> 00000000-0000-0000-0000-000000000000
+  BlendShapesEnabled: true
+  BlendNormals: false
+  BlendShapes:
+    {}
+- !<ObjectPrefabAssetData/29cdee73-98a8-4b08-8eae-6b00f48eea35>
+  Prototype: !<ObjectOwner/e154b45e-c25f-41cd-afd9-30b09a5fe7a4>
+    PackagePath: ""
+    objects:
+      - !<own> 764e33c1-26af-4756-4c48-10781fcdcaad
+- !<SceneObject/764e33c1-26af-4756-4c48-10781fcdcaad>
+  PrefabRemaps:
+    []
+  Name: LightHead
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    - !<own> bb00fe12-97ab-48ac-6cb4-3462e0e5be82
+  Components:
+    []
+- !<SceneObject/bb00fe12-97ab-48ac-6cb4-3462e0e5be82>
+  PrefabRemaps:
+    []
+  Name: ""
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 1782ccc1-3718-4367-7b1c-2bb4e81c1186

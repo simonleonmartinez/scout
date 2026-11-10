@@ -21,7 +21,7 @@ import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
 import {ScoutTips,ScoutToolkitCard,KitCard,IntroCard,Tip,introSeen,markIntroSeen} from "./ScoutOnboarding";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
 import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
-import {BodyKind,CameraRig,HeightSlider,RigPrefabs,TiltWheel,rigHeight} from "./ScoutCameraRig";
+import {BodyKind,CameraRig,HeightSlider,LightRig,RigPrefabs,TiltRig,TiltWheel,rigHeight} from "./ScoutCameraRig";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
@@ -136,6 +136,8 @@ const MODEL_HEIGHTS=[145,165,30,170,125];
 // Camera height slider, in the prop's user-facing frame: out toward the user, off to the side, and up
 // from the prop's mid-height origin so it sits around the camera body.
 const SLIDER_OUT=14,SLIDER_SIDE=30,SLIDER_Y=28;
+// Lights' sliders sit lower, beside the pole, clear of the wide softbox above.
+const LIGHT_SLIDER_Y=-6;
 // Key light rig: local offset from the model's pivot to the softbox opening, in the model's own raw
 // mesh units (meters) — a child's local position is carried through the SAME transform that maps the
 // mesh's own vertices to world space, so using the mesh's own coordinates directly (not re-scaled)
@@ -194,6 +196,7 @@ export class ScoutMain extends BaseScriptComponent {
   @input @allowUndefined workbenchPrefab:ObjectPrefab;
   @input @hint("Camera tripod parts: legs, column, head") classicRig:ObjectPrefab[];
   @input @hint("Camera bodies: cinema, photo") cameraBodies:ObjectPrefab[];
+  @input @hint("Light stand parts: base, pole, upper pole, softbox head") lightRig:ObjectPrefab[];
   @input @allowUndefined cinemaCameraPrefab:ObjectPrefab;
   @input @allowUndefined gimbalPrefab:ObjectPrefab;
   @input @allowUndefined lensPrefab:ObjectPrefab;
@@ -266,7 +269,7 @@ export class ScoutMain extends BaseScriptComponent {
   // Each marker's floating UI pivot, turned to face the user (angle/target in radians about +Y).
   private facingUI:{root:SceneObject;pivot:SceneObject;facing:vec3;angle:number;target:number}[]=[];
   /** Camera props' height sliders: shown beside the prop only while it's in edit mode. */
-  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:CameraRig;wheel:TiltWheel}[]=[];
+  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:TiltRig;wheel:TiltWheel;afterAim?:()=>void}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
   private toolkitCard:ScoutToolkitCard;
@@ -863,6 +866,8 @@ export class ScoutMain extends BaseScriptComponent {
     // NEGATED target here compensates, so the real beam ends up pointing at `tilted` instead of away
     // from it — this was shining the softbox out its back panel instead of through the diffuser.
     bulb.getTransform().setWorldRotation(quat.lookAt(tilted.uniformScale(-1),vec3.up()));
+    // A light on a tilting rig: now the beam is aimed relative to the level softbox, restore its saved tilt.
+    this.heightSliders.find(h=>h.root===root)?.afterAim?.();
   }
   /** The tripod and both bodies, or null if they aren't wired (the Camera prop then falls back to cameraPrefab). */
   private rigPrefabs():RigPrefabs {
@@ -874,19 +879,23 @@ export class ScoutMain extends BaseScriptComponent {
     if(state.body==="cinema"||state.body==="photo")return state.body;
     return this.shootType==="photo"?"photo":"cinema";
   }
-  /** Gives a Camera prop its height slider. The floating UI and the collider rise with the column. */
-  private attachHeightSlider(root:SceneObject,rig:CameraRig,state:CameraAssetState,height:number,col:ColliderComponent):void {
+  /** Gives a Camera or Light prop its edit-mode controls: the height slider (plus, for cameras, the body
+   * picker) and the tilt wheel. The floating UI and the hit box follow the top of the prop. */
+  private attachRigControls(root:SceneObject,rig:TiltRig&{lift:number;setLift(cm:number):void;setTilt(deg:number):void},
+    state:{lift?:number;tilt?:number},height:number,col:ColliderComponent,
+    opts:{sliderY:number;camera?:CameraRig;savedTilt?:number}):void {
     const entry=this.facingUI.find(e=>e.root===root);
     const facing=entry?entry.facing:vec3.forward();
     const side=vec3.up().cross(facing).normalize();
     // A pivot that turns with the floating UI keeps the slider on the user's side of the prop, off to
     // one side of it and clear of the gizmo's arrows (77 cm out) and turn ring (55 cm, at root height).
     const pivot=global.scene.createSceneObject("Height slider pivot");pivot.setParent(root);
-    const pos=facing.uniformScale(SLIDER_OUT).add(side.uniformScale(SLIDER_SIDE)).add(new vec3(0,SLIDER_Y,0));
-    // The floating UI was laid out for the body the prop was built with; another body (or a raised
-    // column) moves the top of the prop, and the UI and hit box follow it.
+    const pos=facing.uniformScale(SLIDER_OUT).add(side.uniformScale(SLIDER_SIDE)).add(new vec3(0,opts.sliderY,0));
+    // The floating UI was laid out for the prop as built; another camera body or a raised column moves
+    // the top of the prop, and the UI and hit box follow it.
+    const cam=opts.camera;
     const fit=()=>{
-      const rise=rig.lift+rigHeight(rig.body)-height;
+      const rise=rig.lift+(cam?rigHeight(cam.body):height)-height;
       if(entry&&!isNull(entry.pivot))entry.pivot.getTransform().setLocalPosition(new vec3(0,rise,0));
       // The hit box stays centred on the root; the extra below the floor is harmless.
       const shape=Shape.createBoxShape();shape.size=new vec3(70,height+2*Math.max(0,rise),70);col.shape=shape;
@@ -897,18 +906,18 @@ export class ScoutMain extends BaseScriptComponent {
       fit();
     };
     const touched=()=>{this.lastAction=getTime();};
-    const wheel=new TiltWheel(rig,this.wheelMaterial(),this.camera,deg=>{
-      rig.setTilt(deg);state.tilt=Math.round(rig.tiltAngle);
-    },touched);
-    const pick=(kind:BodyKind)=>{
-      if(kind===rig.body)return;
-      rig.setBody(kind);state.body=kind;fit();
+    const tilt=(deg:number)=>{rig.setTilt(deg);state.tilt=Math.round(rig.tiltAngle);};
+    const wheel=new TiltWheel(rig,this.wheelMaterial(),this.camera,tilt,touched);
+    const pick=cam?(kind:BodyKind)=>{
+      if(kind===cam.body)return;
+      cam.setBody(kind);(state as CameraAssetState).body=kind;fit();
       wheel.rebuild(this.wheelMaterial());
       this.selectAudio.play(1);
-    };
-    const slider=new HeightSlider(pivot,pos,this.camera,()=>rig.lift,apply,touched,rig.body,pick);
+    }:undefined;
+    const slider=new HeightSlider(pivot,pos,this.camera,()=>rig.lift,apply,touched,cam?.body,pick);
     slider.root.getTransform().setLocalRotation(quat.lookAt(facing,vec3.up()));
-    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null,rig,wheel});
+    const afterAim=opts.savedTilt!==undefined?()=>tilt(opts.savedTilt):undefined;
+    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null,rig,wheel,afterAim});
     apply(rig.lift);
   }
   /** One shared material for the tilt wheels (vertex-coloured, like the gizmo's handles). */
@@ -940,6 +949,7 @@ export class ScoutMain extends BaseScriptComponent {
     if(bodyKind)cameraState.body=bodyKind;
     const height=bodyKind?rigHeight(bodyKind):MODEL_HEIGHTS[kind];
     let rig:CameraRig=null;
+    let lightRigObj:LightRig=null;
     const lightState=kind===1?{...defaultLightState(),...saved?.lightState}:null;
     const noteState=kind===2?{...defaultNoteState(),...saved?.noteState}:null;
     let lightRef:LightMarkerRef|null=null;
@@ -951,6 +961,14 @@ export class ScoutMain extends BaseScriptComponent {
       holder.getTransform().setLocalPosition(new vec3(0,-height/2,0));
       rig=new CameraRig(holder,this.rigPrefabs(),bodyKind,cameraState.lift||0,cameraState.tilt||0);
       this.pivotAtFeet(root,body);
+    }else if(lightState&&this.lightRig?.length===4){
+      // Lights stand on a rig too: the pole rises and the softbox tilts (see ScoutCameraRig).
+      const holder=global.scene.createSceneObject("Rig");holder.setParent(body);
+      holder.getTransform().setLocalPosition(new vec3(0,-height/2,0));
+      // Built level: tiltKeyLight aims the beam first, then the saved tilt is applied (afterAim).
+      lightRigObj=new LightRig(holder,this.lightRig,lightState.lift||0,0);
+      this.pivotAtFeet(root,body);
+      lightRef=this.buildKeyLight(lightRigObj.frame,lightState);
     }else if(prefab){
       const model=prefab.instantiate(body),t=model.getTransform();
       t.setLocalScale(t.getLocalScale().uniformScale(height/30));
@@ -1000,7 +1018,8 @@ export class ScoutMain extends BaseScriptComponent {
     const col=root.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();shape.size=kind===2?new vec3(14,NOTE_PIN_HEIGHT,14):new vec3(kind>=3?55:70,height,kind>=3?55:70);
     col.shape=shape;col.debugDrawEnabled=this.debugColliders;
-    if(rig)this.attachHeightSlider(root,rig,cameraState,height,col);
+    if(rig)this.attachRigControls(root,rig,cameraState,height,col,{sliderY:SLIDER_Y,camera:rig});
+    if(lightRigObj)this.attachRigControls(root,lightRigObj,lightState,height,col,{sliderY:LIGHT_SLIDER_Y,savedTilt:lightState.tilt||0});
     const interactable=root.createComponent(Interactable.getTypeName()) as Interactable;
     interactable.targetingMode=3;
     interactable.onTriggerStart.add(e=>{

@@ -27,7 +27,11 @@ export type CameraAssetState={isoIndex:number;apertureIndex:number;shutterIndex:
   tilt?:number};
 /** Light Asset state — brightness/CCT dial positions for one placed Light marker. Both fields drive the
  * marker's real-time LightSource (see ScoutMain.applyLightLook). */
-export type LightAssetState={intensityIndex:number;kelvinIndex:number};
+export type LightAssetState={intensityIndex:number;kelvinIndex:number;
+  /** How far the stand's pole is raised, cm. */
+  lift?:number;
+  /** Softbox tilt, degrees (up is positive). */
+  tilt?:number};
 
 export function defaultCameraState():CameraAssetState {
   return {isoIndex:2,apertureIndex:3,shutterIndex:12,kelvinIndex:7}; // ISO 400, f/2.8, 1/125s, 5600K

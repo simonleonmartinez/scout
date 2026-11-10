@@ -5,7 +5,7 @@ import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets
 import {addBox} from "./ScoutMarkerMesh";
 import {NoteAssetState, SHOT_TYPE_STEPS, MOVEMENT_STEPS, PHOTO_SHOT_TYPE_STEPS, PHOTO_ANGLE_STEPS} from "./ScoutAssetState";
 
-const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
+const TRASH_ICON=requireAsset("../Icons/delete.png") as Texture;
 const EDIT_ICON=requireAsset("../Icons/edit.png") as Texture;
 const ARROW_ICON=requireAsset("../Icons/arrow_forward.png") as Texture;
 
@@ -57,7 +57,7 @@ export class ScoutNoteWizard {
     });
     this.buildNotepadDressing();
     this.text(this.root,label,new vec3(0,PANEL_H/2-HEADER_H/2,0.3),PANEL_W-24,HEADER_H-6,theme.textColor,105);
-    this.iconBadge(this.root,"DeleteBadge",new vec3(PANEL_W/2-6,PANEL_H/2-HEADER_H/2,0.4),CLOSE_ICON,theme.activeColor,onDelete);
+    this.iconBadge(this.root,"DeleteBadge",new vec3(PANEL_W/2-6,PANEL_H/2-HEADER_H/2,0.4),TRASH_ICON,theme.activeColor,onDelete);
     this.iconBadge(this.root,"EditBadge",new vec3(PANEL_W/2-15,PANEL_H/2-HEADER_H/2,0.4),EDIT_ICON,theme.accent,onEdit);
     this.contentHost=this.obj(this.root,"WizardContent",new vec3(0,-HEADER_H/2-3.5,0.3));
     this.rebuild();

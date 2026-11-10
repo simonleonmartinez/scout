@@ -137,6 +137,17 @@ export function followView(so:SceneObject,camera:Camera,distance:number,drop:num
   t.setWorldPosition(vec3.lerp(t.getWorldPosition(),goal,k));
   t.setWorldRotation(quat.slerp(t.getWorldRotation(),quat.lookAt(look.uniformScale(-1),vec3.up()),k));
 }
+/** Like followView, but tracks the full gaze (looking down at the floor included), so `so` stays in view
+ * wherever the user looks; `drop` is below the gaze line. Faces the eyes. With `snap`, jumps there now. */
+export function followGaze(so:SceneObject,camera:Camera,distance:number,drop:number,rate:number,snap=false):void {
+  const ct=camera.getTransform(),eye=ct.getWorldPosition();
+  const gaze=ct.forward.uniformScale(-1).normalize();
+  const goal=eye.add(gaze.uniformScale(distance)).add(ct.up.uniformScale(-drop));
+  const face=quat.lookAt(eye.sub(goal).normalize(),vec3.up());
+  const t=so.getTransform(),k=snap?1:Math.min(1,getDeltaTime()*rate);
+  t.setWorldPosition(vec3.lerp(t.getWorldPosition(),goal,k));
+  t.setWorldRotation(quat.slerp(t.getWorldRotation(),face,k));
+}
 function flatForward(t:Transform):vec3 {
   const f=t.forward.uniformScale(-1);
   const flat=new vec3(f.x,0,f.z);
@@ -215,6 +226,8 @@ export function pillButton(parent:SceneObject,label:string,pos:vec3,w:number,h:n
 // Shown at arm's length so the × can be reached by hand. Specs' view is narrow, so KIT_SCALE keeps it to
 // ~60% of the view wide (~23 cm across at 55 cm); layout below is in unscaled cm, text sized up to match.
 const KIT_DISTANCE=55,KIT_DROP=3,KIT_SCALE=0.27;
+// It follows the gaze (not just turning), a little quicker than tips, so it's never left behind.
+const KIT_FOLLOW=5;
 const KIT_W=86,KIT_H=58,KIT_TITLE=175,KIT_LABEL=150,KIT_CLOSE=12;
 const KIT_CARD_W=21,KIT_CARD_H=25,KIT_CARD_GAP=23,KIT_FAN=8,KIT_ICON=11;
 const KIT_CARD_TINT=new vec4(0x24/255,0x1c/255,0x48/255,1);
@@ -230,7 +243,7 @@ export class ScoutToolkitCard {
   show(title:string,cards:KitCard[]):void {
     this.close();
     const root=global.scene.createSceneObject("Toolkit card");
-    placeInView(root,this.camera,KIT_DISTANCE,KIT_DROP);
+    followGaze(root,this.camera,KIT_DISTANCE,KIT_DROP,KIT_FOLLOW,true);
     root.getTransform().setLocalScale(vec3.one().uniformScale(KIT_SCALE));
     root.createComponent("Component.Canvas");
     panel(root,KIT_W,KIT_H,PANEL_TINT,4);
@@ -265,6 +278,6 @@ export class ScoutToolkitCard {
     this.schedule(0.5,()=>{if(!isNull(root))root.destroy();});
   }
   update():void {
-    if(this.active)followView(this.root,this.camera,KIT_DISTANCE,KIT_DROP,TIP_FOLLOW);
+    if(this.active)followGaze(this.root,this.camera,KIT_DISTANCE,KIT_DROP,KIT_FOLLOW);
   }
 }
