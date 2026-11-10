@@ -19,13 +19,16 @@ import {ScoutWorkbench,ShootType} from "./ScoutWorkbench";
 import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
 import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
 import {ScoutTips,IntroCard,Tip,introSeen,markIntroSeen} from "./ScoutOnboarding";
+import {ScoutRoomOutline} from "./ScoutRoomOutline";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
  * facing direction), h is height above the floor, r is yaw relative to the user's. */
 type SavedMarker={k:number;l:string;x:number;z:number;h:number;r:number;c?:CameraAssetState;li?:LightAssetState;n?:NoteAssetState};
 type SavedPoster={x:number;z:number;h:number;r:number};
-type SavedLayout={v:2;m:SavedMarker[];p:SavedPoster[];s?:ShootType};
+// o: the room outline's corners as flat x,z pairs in the same frame — when present, the frame is the
+// outline's rather than the user's, and loading lets the user line the outline up with the real room.
+type SavedLayout={v:2;m:SavedMarker[];p:SavedPoster[];s?:ShootType;o?:number[]};
 type UserFrame={origin:vec3;yaw:number};
 /** The exact runtime hooks one placed Light asset needs so its dials can affect something real. */
 type LightMarkerRef={light:LightSource;glowVisual:RenderMeshVisual};
@@ -244,6 +247,11 @@ export class ScoutMain extends BaseScriptComponent {
   private facingUI:{root:SceneObject;pivot:SceneObject;facing:vec3;angle:number;target:number}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
+  // Room outline that saved layouts are stored against; confirmed once drawn (or lined up) this session.
+  private roomOutline:ScoutRoomOutline;
+  private outlineConfirmed=false;
+  // While a loaded layout is being lined up: each item's position in the outline frame, so it moves live.
+  private aligning:{so:SceneObject;x:number;z:number;r:number}[]=null;
 
   onAwake():void {
     this.createEvent("OnStartEvent").bind(()=>this.start());
@@ -317,6 +325,9 @@ export class ScoutMain extends BaseScriptComponent {
     this.posterGhost=buildPoster(this.markerMaterial,true);this.posterGhost.enabled=false;
     this.palette.onPinPoster.add(()=>{this.lastAction=getTime();this.pending=null;this.pinningPoster=true;this.wallHit=null;});
     this.tips=new ScoutTips(this.camera,TIPS,(s,fn)=>this.schedule(s,fn));
+    this.roomOutline=new ScoutRoomOutline(this.markerMaterial,this.camera,
+      ()=>this.floorY===null?this.camera.getTransform().getWorldPosition().y-150:this.floorY,
+      (s,fn)=>this.schedule(s,fn),()=>this.followOutline());
     this.rebuildPreview();this.refresh();this.ready=true;
     console.log("Scout ready: point at the floor to set it, then choose equipment, notes, or actors.");
   }
@@ -404,12 +415,17 @@ export class ScoutMain extends BaseScriptComponent {
       this.workbench.show(this.floorY,{cards:INTRO_CARDS,onDone:()=>{markIntroSeen();this.lastAction=getTime();}},!introSeen(),this.floorSetup.spot);
     }
     const settingUp=!this.floorSetup.done||(benchWaiting&&!this.workbenchShown)||this.workbench.active;
+    this.tips.held=this.roomOutline.active||this.angleCapture.guiding;
     this.tips.update();
-    if(this.paletteShown===settingUp){this.paletteShown=!settingUp;this.palette.sceneObject.enabled=!settingUp;}
+    // The menu also steps aside while the room outline is drawn or lined up: it would sit in front of the
+    // outline panel and its buttons.
+    const hideMenu=settingUp||this.roomOutline.active;
+    if(this.paletteShown===hideMenu){this.paletteShown=!hideMenu;this.palette.sceneObject.enabled=!hideMenu;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
     this.angleCapture.update();
-    if(settingUp||this.pinningPoster||this.angleCapture.guiding){
+    this.roomOutline.update();
+    if(settingUp||this.pinningPoster||this.angleCapture.guiding||this.roomOutline.active){
       this.placementPreview.enabled=false;
       this.updateGroundIndicator(false,aim);
       this.updatePosterGhost(ray,aim);
@@ -754,7 +770,7 @@ export class ScoutMain extends BaseScriptComponent {
   }
   private placeAt(interactor?:Interactor):void {
     // Walking over to capture a camera angle: a stray pinch must not drop a new asset.
-    if(this.angleCapture.guiding)return;
+    if(this.angleCapture.guiding||this.roomOutline.active)return;
     if(!this.floorSetup.done){
       if(this.floorSetup.canSkip){this.lastAction=getTime();this.floorSetup.skip();}
       return;
@@ -1085,7 +1101,18 @@ export class ScoutMain extends BaseScriptComponent {
     this.tips.done("save");
     if(this.layouts.list().length>=MAX_SAVED_LAYOUTS){this.showHint("Delete a saved layout to make room");this.selectAudio.play(1);return}
     if(!this.placed.length&&!this.posters.length){this.showHint("Place something before saving");this.selectAudio.play(1);return}
-    const frame=this.userFrame(),floor=frame.origin.y;
+    if(this.outlineConfirmed){this.writeLayout(this.roomOutline.frame,this.roomOutline.points);return}
+    // First save this session: outline the room, so the layout can be put back exactly where it is.
+    // Skipping saves it around where the user stands, as before.
+    this.roomOutline.define(ok=>{
+      this.lastAction=getTime();
+      if(ok){this.outlineConfirmed=true;this.writeLayout(this.roomOutline.frame,this.roomOutline.points);}
+      else this.writeLayout(this.userFrame(),null);
+    });
+  }
+  /** Stores what's placed relative to `frame` (the room outline's, or the user's), plus the outline. */
+  private writeLayout(frame:UserFrame,outline:vec2[]):void {
+    const floor=frame.origin.y;
     // Millimetres for positions; yaw (radians) needs finer steps — 0.1 rad would be ~6°.
     const round=(n:number)=>Math.round(n*10)/10,roundYaw=(n:number)=>Math.round(n*1000)/1000;
     const data:SavedLayout={v:2,s:this.shootType||undefined,
@@ -1098,6 +1125,7 @@ export class ScoutMain extends BaseScriptComponent {
         const pos=poster.getTransform().getWorldPosition(),p=this.toFrame(frame,pos);
         return {x:round(p.x),z:round(p.z),h:round(pos.y-floor),r:roundYaw(this.yawOf(poster)-frame.yaw)};
       }),
+      o:outline?outline.reduce((a,q)=>a.concat([round(q.x),round(q.y)]),[] as number[]):undefined,
     };
     const info=this.layouts.save(this.layouts.nextUntitledName(),JSON.stringify(data),data.m.length+data.p.length);
     if(!info){this.showHint("Couldn't save — storage is full");return}
@@ -1117,6 +1145,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.clear();
     if(data.s==="photo"||data.s==="video")this.chooseShoot(data.s);
     const frame=this.userFrame(),floor=frame.origin.y;
+    const items:{so:SceneObject;x:number;z:number;r:number}[]=[];
     for(const m of data.m.slice(0,this.maxMarkers)){
       if(![0,1,2,3,4].includes(m.k))continue;
       const surface=floor+m.h;
@@ -1125,15 +1154,36 @@ export class ScoutMain extends BaseScriptComponent {
       root.getTransform().setWorldRotation(quat.angleAxis(frame.yaw+m.r,vec3.up()));
       this.liftOnto(root,surface);
       if(m.k===1)this.tiltKeyLight(root);
+      items.push({so:root,x:m.x,z:m.z,r:m.r});
     }
     for(const p of data.p){
       const poster=this.makePoster();
       poster.getTransform().setWorldPosition(this.fromFrame(frame,p.x,p.z,floor+p.h));
       poster.getTransform().setWorldRotation(quat.angleAxis(frame.yaw+p.r,vec3.up()));
+      items.push({so:poster,x:p.x,z:p.z,r:p.r});
+    }
+    // Saved against a room outline: show it where the layout landed and let the user line it up with the
+    // real walls; everything follows the outline live (followOutline) until they tap Done.
+    const o=Array.isArray(data.o)&&data.o.length>=6&&data.o.length%2===0?data.o:null;
+    if(o){
+      const pts:vec2[]=[];for(let i=0;i<o.length;i+=2)pts.push(new vec2(o[i],o[i+1]));
+      this.aligning=items;
+      this.roomOutline.align(pts,frame,()=>{this.aligning=null;this.outlineConfirmed=true;this.lastAction=getTime();});
     }
     this.sequence=Math.max(this.sequence,...data.m.map(m=>Number(m.l.match(/(\d+)$/)?.[1])||0));
     this.refresh();this.placeAudio.play(1);
     console.log("Scout loaded layout "+id+" ("+data.m.length+" markers, "+data.p.length+" posters)");
+  }
+  /** While lining up a loaded layout: re-places each item in the outline's current frame (height kept). */
+  private followOutline():void {
+    if(!this.aligning)return;
+    const f=this.roomOutline.frame;
+    this.aligning=this.aligning.filter(it=>!isNull(it.so));
+    for(const it of this.aligning){
+      const t=it.so.getTransform();
+      t.setWorldPosition(this.fromFrame(f,it.x,it.z,t.getWorldPosition().y));
+      t.setWorldRotation(quat.angleAxis(f.yaw+it.r,vec3.up()));
+    }
   }
   /** Names a saved layout by voice: the name updates live as it's heard and is kept once the user pauses.
    * Tapping the mic again stops listening. */

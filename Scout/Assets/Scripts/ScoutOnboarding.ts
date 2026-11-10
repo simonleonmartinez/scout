@@ -4,9 +4,9 @@ import {addBackPlateHover} from "./ScoutHover";
 
 const FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 // Brand inks: lavender titles (as in the bench header), cream body text, on a dark gear-grey panel.
-const TITLE_INK=new vec4(0xc1/255,0xad/255,0xff/255,1);
-const BODY_INK=new vec4(0.93,0.88,0.78,1);
-const PANEL_TINT=new vec4(0.1,0.1,0.11,1);
+export const TITLE_INK=new vec4(0xc1/255,0xad/255,0xff/255,1);
+export const BODY_INK=new vec4(0.93,0.88,0.78,1);
+export const PANEL_TINT=new vec4(0.1,0.1,0.11,1);
 
 // Text sizes are set for reading in glasses, not on a monitor: at these distances the cap height is
 // roughly 2-3cm. Nothing here goes below TIP_BODY.
@@ -63,7 +63,14 @@ export class ScoutTips {
     if(this.current?.id===id)this.hide();
   }
 
+  /** While true (another guided step owns the view), no tip shows; one already up waits its turn again. */
+  held=false;
+
   update():void {
+    if(this.held){
+      if(this.current){const id=this.current.id;this.hide();this.queue.unshift(id);}
+      return;
+    }
     if(this.current&&(isNull(this.current.root)||getTime()>this.current.until))this.hide();
     if(!this.current&&this.queue.length)this.present(this.queue.shift());
     if(this.current)followView(this.current.root,this.camera,TIP_DISTANCE,TIP_DROP,TIP_FOLLOW);
@@ -113,7 +120,7 @@ function writeFlag(store:GeneralDataStore,key:string):void {
 }
 /** Stands `so` `distance` cm ahead of the eyes (level, ignoring head pitch), `drop` cm below eye line,
  * facing the user. */
-function placeInView(so:SceneObject,camera:Camera,distance:number,drop:number):void {
+export function placeInView(so:SceneObject,camera:Camera,distance:number,drop:number):void {
   const ct=camera.getTransform(),eye=ct.getWorldPosition();
   const look=flatForward(ct);
   const pos=eye.add(look.uniformScale(distance)).add(new vec3(0,-drop,0));
@@ -122,7 +129,7 @@ function placeInView(so:SceneObject,camera:Camera,distance:number,drop:number):v
 }
 /** Lazily drifts `so` back in front of the user as they turn, so a tip stays readable without being
  * glued to the head. */
-function followView(so:SceneObject,camera:Camera,distance:number,drop:number,rate:number):void {
+export function followView(so:SceneObject,camera:Camera,distance:number,drop:number,rate:number):void {
   const ct=camera.getTransform(),eye=ct.getWorldPosition(),look=flatForward(ct);
   const goal=eye.add(look.uniformScale(distance)).add(new vec3(0,-drop,0));
   const t=so.getTransform(),k=Math.min(1,getDeltaTime()*rate);
@@ -134,19 +141,19 @@ function flatForward(t:Transform):vec3 {
   const flat=new vec3(f.x,0,f.z);
   return flat.length>1e-4?flat.normalize():new vec3(0,0,-1);
 }
-function child(parent:SceneObject,name:string,pos:vec3):SceneObject {
+export function child(parent:SceneObject,name:string,pos:vec3):SceneObject {
   const so=global.scene.createSceneObject(name);so.setParent(parent);so.getTransform().setLocalPosition(pos);return so;
 }
-function styleBack(back:BackPlate,color:vec4,radius:number):void {
+export function styleBack(back:BackPlate,color:vec4,radius:number):void {
   const r=(back as unknown as {roundedRectangle:{gradient:boolean;backgroundColor:vec4;cornerRadius:number}}).roundedRectangle;
   r.gradient=false;r.backgroundColor=color;r.cornerRadius=radius;
 }
-function panel(so:SceneObject,w:number,h:number,color:vec4,radius:number):void {
+export function panel(so:SceneObject,w:number,h:number,color:vec4,radius:number):void {
   const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
   back.style="simple";back.size=new vec2(w,h);
   back.onInitialized.add(()=>{styleBack(back,color,radius);back.interactable.enabled=false;back.interactionPlane.enabled=false;});
 }
-function text(parent:SceneObject,value:string,pos:vec3,w:number,h:number,size:number,color:vec4):Text {
+export function text(parent:SceneObject,value:string,pos:vec3,w:number,h:number,size:number,color:vec4):Text {
   const so=child(parent,"Text",pos);
   const t=so.createComponent("Component.Text") as Text;
   t.text=value;t.font=FONT;t.size=size;t.textFill.color=color;t.depthTest=true;
@@ -155,13 +162,13 @@ function text(parent:SceneObject,value:string,pos:vec3,w:number,h:number,size:nu
   t.layoutRect=Rect.create(-w/2,w/2,-h/2,h/2);
   return t;
 }
-function image(so:SceneObject,tex:Texture,w:number,h:number,tint:vec4):void {
+export function image(so:SceneObject,tex:Texture,w:number,h:number,tint:vec4):void {
   so.getTransform().setLocalScale(new vec3(w,h,1));
   const img=so.createComponent("Component.Image") as Image;
   img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();img.mainPass.baseTex=tex;img.mainPass.baseColor=tint;
 }
 const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
-const CLOSE_NAME="Close";
+const CLOSE_NAME="Close",BUTTON_NAME="Button";
 const CLOSE_TINT=new vec4(0x3e/255,0x30/255,0x82/255,1);
 /** A small round × button (BackPlate circle with the close icon) that calls `onTap`. */
 function closeButton(so:SceneObject,onTap:()=>void):void {
@@ -176,14 +183,29 @@ function closeButton(so:SceneObject,onTap:()=>void):void {
   const icon=child(so,"Icon",new vec3(0,0,0.3));
   image(icon,CLOSE_ICON,CLOSE_SIZE*0.55,CLOSE_SIZE*0.55,BODY_INK);
 }
-/** The rest of a tip is read-only: the panel's own collider would otherwise catch pinches (and hover)
- * meant for whatever is behind it. The close button keeps its collider. */
-function sweepColliders(root:SceneObject,schedule:(seconds:number,fn:()=>void)=>void):void {
+/** Panels are read-only apart from their buttons: the panel's own collider would otherwise catch pinches
+ * (and hover) meant for whatever is behind it. Close buttons and pill buttons keep theirs. */
+export function sweepColliders(root:SceneObject,schedule:(seconds:number,fn:()=>void)=>void):void {
   schedule(0.1,()=>{
     const visit=(node:SceneObject)=>{
-      if(isNull(node)||node.name===CLOSE_NAME)return;
+      if(isNull(node)||node.name===CLOSE_NAME||node.name===BUTTON_NAME)return;
       node.getComponents("Physics.ColliderComponent").forEach(c=>c.enabled=false);
       for(let i=0;i<node.getChildrenCount();i++)visit(node.getChild(i));
     };visit(root);
   });
+}
+const BUTTON_TINT=new vec4(0x5a/255,0x44/255,0xb8/255,1),BUTTON_QUIET=new vec4(0x2a/255,0x26/255,0x36/255,1);
+/** A pill button (named BUTTON_NAME so sweepColliders spares it): purple, or dark grey when `quiet`. */
+export function pillButton(parent:SceneObject,label:string,pos:vec3,w:number,h:number,size:number,quiet:boolean,onTap:()=>void):void {
+  const so=child(parent,BUTTON_NAME,pos);
+  const tint=quiet?BUTTON_QUIET:BUTTON_TINT;
+  const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
+  back.style="simple";back.size=new vec2(w,h);
+  back.onInitialized.add(()=>{
+    styleBack(back,tint,h/2);
+    back.interactionPlane.enabled=false;
+    back.interactable.onTriggerEnd.add(()=>onTap());
+    addBackPlateHover(back,so,tint);
+  });
+  text(so,label,new vec3(0,0,0.4),w-2,h-1,size,BODY_INK);
 }
