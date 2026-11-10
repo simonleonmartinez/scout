@@ -1,0 +1,95 @@
+- !<AssetImportMetadata/2018b6e7-6761-414f-891a-a5dcf90bff3b>
+  ImportedAssetIds:
+    .hidden/Classic: !<reference> 97cbb8fc-0f8d-4180-b2a7-16314976282d
+    .hidden/white: !<reference> d35299b9-acde-486f-9403-c20fff35915e
+    26ba073d67b9d0dd: !<reference> c550112d-26e2-4c51-9150-cfdb735cded0
+    6681b3f8f8f5ede3: !<reference> a78029ce-3ef1-4d90-bf9a-8bb836632c50
+    Materials/Classic: !<reference> 9f51a9cb-d879-4a25-a207-8c681f08d429
+    Materials/Classic|Classic|GraphPassInfo: !<reference> e206d696-9af3-42f2-a9c5-6529262e6a6e
+    Meshes/Mesh 1: !<reference> 725034a5-3ba1-41e8-9a42-7d6f8a2dcb5e
+    Scene: !<reference> fa18e9a9-c3b0-4aa6-9d6c-ee52baeda6ca
+    Textures/Classic: !<reference> 21f122a9-9b93-4e4d-a05b-5582574eeab1
+    cb16681e7113a59e: !<reference> b26851f6-8c19-4102-a698-e7869dab8e16
+  ImporterName: ObjImporter
+  PrimaryAsset: !<reference> fa18e9a9-c3b0-4aa6-9d6c-ee52baeda6ca
+  PackageType: LegacyPackage
+  LegacyPackagePolicy: CanBeUnpackedTransparent
+  ExtraData:
+    {}
+  AssetDataMap:
+    Scene: !<own> 96c7f139-5cb4-42e9-90f5-844f989945c7
+  DependentFiles:
+    - Classic.jpg
+    - Classic.mtl
+  ImporterSettings: !<D3FileImporterSettingsBase>
+    UseLegacyImporter: false
+    WithMaterials: true
+    NamingConvention: ByCategorySanitizeV2
+    PersistentIdGenerationAlgorithm: DescriptorBasedV2
+  CompressionSettings: !<ComplexCompressionSettings>
+    Presets:
+      Performance Compression: !<PerformanceCompressionSettings>
+        Level: Medium
+        Mipmap: false
+      None Compression: !<FileCompressionSettings>
+        {}
+    ExtensionMappings:
+      jpg: Performance Compression
+      mesh: None Compression
+    Overrides:
+      {}
+- !<ObjectPrefabAssetData/96c7f139-5cb4-42e9-90f5-844f989945c7>
+  Prototype: !<ObjectOwner/2290b1a0-a370-4394-a66b-f49e740fc964>
+    PackagePath: ""
+    objects:
+      - !<own> c550112d-26e2-4c51-6eaf-30248ca3212f
+- !<SceneObject/a78029ce-3ef1-4d90-4065-7447c99cd3af>
+  PrefabRemaps:
+    []
+  Name: ""
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> b26851f6-8c19-4102-5967-1879625471e9
+- !<RenderMeshVisual/b26851f6-8c19-4102-5967-1879625471e9>
+  PrefabRemaps:
+    []
+  Name: component_0
+  Enabled: true
+  RenderOrder: 0
+  StretchMode: Stretch
+  VerticalAlignment: Center
+  HorizontalAlignment: Center
+  MeshShadowMode: None
+  ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+  ShadowDensity: 1.000000
+  Materials:
+    - !<reference> 9f51a9cb-d879-4a25-a207-8c681f08d429
+  Mesh: !<reference> 725034a5-3ba1-41e8-9a42-7d6f8a2dcb5e
+  Skin: !<reference> 00000000-0000-0000-0000-000000000000
+  BlendShapesEnabled: true
+  BlendNormals: false
+  BlendShapes:
+    {}
+- !<SceneObject/c550112d-26e2-4c51-6eaf-30248ca3212f>
+  PrefabRemaps:
+    []
+  Name: ClassicLegs
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    - !<own> a78029ce-3ef1-4d90-4065-7447c99cd3af
+  Components:
+    []

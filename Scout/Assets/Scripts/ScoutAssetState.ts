@@ -18,7 +18,11 @@ export const INTENSITY_STOPS:DialStep[]=stops(Array.from({length:21},(_,i)=>i*5)
 
 /** Camera Asset state — exposure/WB dial positions for one placed Camera marker. Purely informational:
  * no dial here drives a real rendering effect. */
-export type CameraAssetState={isoIndex:number;apertureIndex:number;shutterIndex:number;kelvinIndex:number};
+export type CameraAssetState={isoIndex:number;apertureIndex:number;shutterIndex:number;kelvinIndex:number;
+  /** Which camera sits on the tripod ("cinema" | "photo"); unset picks the shoot type's default. */
+  body?:string;
+  /** How far the centre column is raised, cm. */
+  lift?:number};
 /** Light Asset state — brightness/CCT dial positions for one placed Light marker. Both fields drive the
  * marker's real-time LightSource (see ScoutMain.applyLightLook). */
 export type LightAssetState={intensityIndex:number;kelvinIndex:number};

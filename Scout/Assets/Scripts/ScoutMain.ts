@@ -20,6 +20,8 @@ import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
 import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
 import {ScoutTips,IntroCard,Tip,introSeen,markIntroSeen} from "./ScoutOnboarding";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
+import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
+import {BodyKind,CameraRig,HeightSlider,RigPrefabs,rigHeight} from "./ScoutCameraRig";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
@@ -28,7 +30,8 @@ type SavedMarker={k:number;l:string;x:number;z:number;h:number;r:number;c?:Camer
 type SavedPoster={x:number;z:number;h:number;r:number};
 // o: the room outline's corners as flat x,z pairs in the same frame — when present, the frame is the
 // outline's rather than the user's, and loading lets the user line the outline up with the real room.
-type SavedLayout={v:2;m:SavedMarker[];p:SavedPoster[];s?:ShootType;o?:number[]};
+// a: the Spatial Anchor saved at the layout's frame (added once the anchor has been saved).
+type SavedLayout={v:2;m:SavedMarker[];p:SavedPoster[];s?:ShootType;o?:number[];a?:string};
 type UserFrame={origin:vec3;yaw:number};
 /** The exact runtime hooks one placed Light asset needs so its dials can affect something real. */
 type LightMarkerRef={light:LightSource;glowVisual:RenderMeshVisual};
@@ -76,6 +79,8 @@ const TIPS:{[id:string]:Tip}={
 // A fist grabs the prop hovered up to this long ago (s) — the targeting ray drifts as the hand closes.
 // Also how recent a queued placement must be for a starting grab to cancel it as the fist's own pinch.
 const GRAB_TARGET_GRACE=0.35;
+// How long a load waits for Specs to recognise the room from a layout's Spatial Anchor (s).
+const ANCHOR_WAIT_SECONDS=6;
 // A preview hit older than this no longer describes where the cursor is now.
 const PREVIEW_HIT_FRESH=0.6;
 // Only near-horizontal hits count as something to stand on — a wall or sofa side can't set a height.
@@ -119,6 +124,9 @@ const GROUND_PULSE_SPEED=2.4,GROUND_PULSE_DEPTH=0.18;
 const HAND_KIND=5;
 
 const MODEL_HEIGHTS=[145,165,30,170,125];
+// Camera height slider, in the prop's user-facing frame: out toward the user, off to the side, and up
+// from the prop's mid-height origin so it sits around the camera body.
+const SLIDER_OUT=14,SLIDER_SIDE=30,SLIDER_Y=28;
 // Key light rig: local offset from the model's pivot to the softbox opening, in the model's own raw
 // mesh units (meters) — a child's local position is carried through the SAME transform that maps the
 // mesh's own vertices to world space, so using the mesh's own coordinates directly (not re-scaled)
@@ -168,12 +176,15 @@ export class ScoutMain extends BaseScriptComponent {
   @input @hint("Volume of select and placement cues") @widget(new SliderWidget(0,1,0.05)) sfxVolume:number=0.25;
   @input connectedLensModule:ConnectedLensModule;
   @input cloudStorageModule:CloudStorageModule;
+  @input @allowUndefined @hint("Spatial Anchors: saved layouts snap back into the same room") anchorModule:AnchorModule;
   @input @allowUndefined cameraPrefab:ObjectPrefab;
   @input @allowUndefined lightPrefab:ObjectPrefab;
   @input @allowUndefined standingPrefab:ObjectPrefab;
   @input @allowUndefined seatedPrefab:ObjectPrefab;
   // Onboarding workbench gear (generated models); any left empty is simply skipped.
   @input @allowUndefined workbenchPrefab:ObjectPrefab;
+  @input @hint("Camera tripod parts: legs, column, head") classicRig:ObjectPrefab[];
+  @input @hint("Camera bodies: cinema, photo") cameraBodies:ObjectPrefab[];
   @input @allowUndefined cinemaCameraPrefab:ObjectPrefab;
   @input @allowUndefined gimbalPrefab:ObjectPrefab;
   @input @allowUndefined lensPrefab:ObjectPrefab;
@@ -245,11 +256,14 @@ export class ScoutMain extends BaseScriptComponent {
   private hoverSeen:{root:SceneObject;time:number}=null;
   // Each marker's floating UI pivot, turned to face the user (angle/target in radians about +Y).
   private facingUI:{root:SceneObject;pivot:SceneObject;facing:vec3;angle:number;target:number}[]=[];
+  /** Camera props' height sliders: shown beside the prop only while it's in edit mode. */
+  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
   // Room outline that saved layouts are stored against; confirmed once drawn (or lined up) this session.
   private roomOutline:ScoutRoomOutline;
   private outlineConfirmed=false;
+  private anchors:ScoutAnchors;
   // While a loaded layout is being lined up: each item's position in the outline frame, so it moves live.
   private aligning:{so:SceneObject;x:number;z:number;r:number}[]=null;
 
@@ -321,10 +335,11 @@ export class ScoutMain extends BaseScriptComponent {
     this.palette.onLoadLayout.add(id=>this.loadLayout(id));
     this.palette.onRenameLayout.add(id=>this.renameLayout(id));
     this.palette.onVoiceRenameLayout.add(id=>this.voiceRenameLayout(id));
-    this.palette.onDeleteLayout.add(id=>{this.lastAction=getTime();this.layouts.remove(id);this.palette.setLayouts(this.layouts.list());this.selectAudio.play(1);});
+    this.palette.onDeleteLayout.add(id=>{this.lastAction=getTime();this.forgetAnchor(id);this.layouts.remove(id);this.palette.setLayouts(this.layouts.list());this.selectAudio.play(1);});
     this.posterGhost=buildPoster(this.markerMaterial,true);this.posterGhost.enabled=false;
     this.palette.onPinPoster.add(()=>{this.lastAction=getTime();this.pending=null;this.pinningPoster=true;this.wallHit=null;});
     this.tips=new ScoutTips(this.camera,TIPS,(s,fn)=>this.schedule(s,fn));
+    this.anchors=new ScoutAnchors(this.anchorModule||null);
     this.roomOutline=new ScoutRoomOutline(this.markerMaterial,this.camera,
       ()=>this.floorY===null?this.camera.getTransform().getWorldPosition().y-150:this.floorY,
       (s,fn)=>this.schedule(s,fn),()=>this.followOutline());
@@ -342,7 +357,18 @@ export class ScoutMain extends BaseScriptComponent {
     if(this.previewShape&&!isNull(this.previewShape))this.previewShape.destroy();
     if(this.selected===HAND_KIND){this.previewShape=null;return}
     const prefab=this.prefabFor(this.selected);
-    if(prefab){
+    const rigs=this.selected===0?this.rigPrefabs():null;
+    if(rigs){
+      // The camera ghost shows the body this shoot will place.
+      this.previewShape=global.scene.createSceneObject("Camera rig preview");
+      this.previewShape.setParent(this.placementPreview);
+      const ghostBody=this.bodyFor({} as CameraAssetState);
+      new CameraRig(this.previewShape,rigs,ghostBody,0);
+      // The same small cursor size the other tools' ghosts have.
+      this.previewShape.getTransform().setLocalScale(vec3.one().uniformScale(30/rigHeight(ghostBody)));
+      const visual=findMeshVisual(this.previewShape);
+      if(visual)this.previewShape.getTransform().setLocalPosition(new vec3(0,this.placementPreview.getTransform().getWorldPosition().y-visual.worldAabbMin().y,0));
+    }else if(prefab){
       this.previewShape=prefab.instantiate(this.placementPreview);
       // A small cursor model indicates the selected tool without hiding the venue. Stand it on the ground
       // grid by its lowest point (not its pivot), the same way placed markers stand on the floor.
@@ -370,6 +396,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.shared?.tick();
     this.gizmo.update();
     this.followPalette();
+    this.updateHeightSliders();
     const all=InteractionManager.getInstance().getInteractorsByType(InteractorInputType.All);
     all.forEach(interactor=>{
       if(this.interactors.indexOf(interactor)>=0)return;
@@ -823,18 +850,79 @@ export class ScoutMain extends BaseScriptComponent {
     // from it — this was shining the softbox out its back panel instead of through the diffuser.
     bulb.getTransform().setWorldRotation(quat.lookAt(tilted.uniformScale(-1),vec3.up()));
   }
+  /** The tripod and both bodies, or null if they aren't wired (the Camera prop then falls back to cameraPrefab). */
+  private rigPrefabs():RigPrefabs {
+    if(this.classicRig?.length!==3||this.cameraBodies?.length!==2)return null;
+    return {tripod:this.classicRig,bodies:{cinema:this.cameraBodies[0],photo:this.cameraBodies[1]}};
+  }
+  /** A camera's body: the one it was saved with, else cinema for video shoots and photo for photo shoots. */
+  private bodyFor(state:CameraAssetState):BodyKind {
+    if(state.body==="cinema"||state.body==="photo")return state.body;
+    return this.shootType==="photo"?"photo":"cinema";
+  }
+  /** Gives a Camera prop its height slider. The floating UI and the collider rise with the column. */
+  private attachHeightSlider(root:SceneObject,rig:CameraRig,state:CameraAssetState,height:number,col:ColliderComponent):void {
+    const entry=this.facingUI.find(e=>e.root===root);
+    const facing=entry?entry.facing:vec3.forward();
+    const side=vec3.up().cross(facing).normalize();
+    // A pivot that turns with the floating UI keeps the slider on the user's side of the prop, off to
+    // one side of it and clear of the gizmo's arrows (77 cm out) and turn ring (55 cm, at root height).
+    const pivot=global.scene.createSceneObject("Height slider pivot");pivot.setParent(root);
+    const pos=facing.uniformScale(SLIDER_OUT).add(side.uniformScale(SLIDER_SIDE)).add(new vec3(0,SLIDER_Y,0));
+    // The floating UI was laid out for the body the prop was built with; another body (or a raised
+    // column) moves the top of the prop, and the UI and hit box follow it.
+    const fit=()=>{
+      const rise=rig.lift+rigHeight(rig.body)-height;
+      if(entry&&!isNull(entry.pivot))entry.pivot.getTransform().setLocalPosition(new vec3(0,rise,0));
+      // The hit box stays centred on the root; the extra below the floor is harmless.
+      const shape=Shape.createBoxShape();shape.size=new vec3(70,height+2*Math.max(0,rise),70);col.shape=shape;
+    };
+    const apply=(cm:number)=>{
+      rig.setLift(cm);
+      state.lift=Math.round(rig.lift*10)/10;
+      fit();
+    };
+    const pick=(kind:BodyKind)=>{
+      if(kind===rig.body)return;
+      rig.setBody(kind);state.body=kind;fit();
+      this.selectAudio.play(1);
+    };
+    const slider=new HeightSlider(pivot,pos,this.camera,()=>rig.lift,apply,()=>{this.lastAction=getTime();},rig.body,pick);
+    slider.root.getTransform().setLocalRotation(quat.lookAt(facing,vec3.up()));
+    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null});
+    apply(rig.lift);
+  }
+  /** Each slider shows only while its prop is in edit mode, turned with that prop's floating UI. */
+  private updateHeightSliders():void {
+    this.heightSliders=this.heightSliders.filter(h=>!isNull(h.root)&&!isNull(h.pivot));
+    for(const h of this.heightSliders){
+      const show=this.gizmo.isEditing(h.root)||h.slider.dragging;
+      if(h.slider.root.enabled!==show)h.slider.root.enabled=show;
+      if(show&&h.facingPivot&&!isNull(h.facingPivot))h.pivot.getTransform().setLocalRotation(h.facingPivot.getTransform().getLocalRotation());
+    }
+  }
   private prefabFor(kind:number):ObjectPrefab {return [this.cameraPrefab,this.lightPrefab,null,this.standingPrefab,this.seatedPrefab][kind];}
   private makeMarker(kind:number,label:string,groundY:number,saved?:MarkerRecord):SceneObject {
     const root=global.scene.createSceneObject(label);root.setParent(this.markers);
-    const prefab=this.prefabFor(kind),height=MODEL_HEIGHTS[kind];
+    const prefab=this.prefabFor(kind);
     const cameraState=kind===0?{...defaultCameraState(),...saved?.cameraState}:null;
+    // Camera props stand on a rig whose centre column can rise (see ScoutCameraRig).
+    const bodyKind=cameraState&&this.rigPrefabs()?this.bodyFor(cameraState):null;
+    if(bodyKind)cameraState.body=bodyKind;
+    const height=bodyKind?rigHeight(bodyKind):MODEL_HEIGHTS[kind];
+    let rig:CameraRig=null;
     const lightState=kind===1?{...defaultLightState(),...saved?.lightState}:null;
     const noteState=kind===2?{...defaultNoteState(),...saved?.noteState}:null;
     let lightRef:LightMarkerRef|null=null;
     // The prop's body hangs under a pivot at its feet (kept the root's first child, so bottomOf still
     // finds the body's mesh first): hover grows the pivot, so the prop swells up from the floor.
     const body=global.scene.createSceneObject("Body");body.setParent(root);
-    if(prefab){
+    if(bodyKind){
+      const holder=global.scene.createSceneObject("Rig");holder.setParent(body);
+      holder.getTransform().setLocalPosition(new vec3(0,-height/2,0));
+      rig=new CameraRig(holder,this.rigPrefabs(),bodyKind,cameraState.lift||0);
+      this.pivotAtFeet(root,body);
+    }else if(prefab){
       const model=prefab.instantiate(body),t=model.getTransform();
       t.setLocalScale(t.getLocalScale().uniformScale(height/30));
       t.setLocalPosition(new vec3(0,-height/2,0));
@@ -883,6 +971,7 @@ export class ScoutMain extends BaseScriptComponent {
     const col=root.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();shape.size=kind===2?new vec3(14,NOTE_PIN_HEIGHT,14):new vec3(kind>=3?55:70,height,kind>=3?55:70);
     col.shape=shape;col.debugDrawEnabled=this.debugColliders;
+    if(rig)this.attachHeightSlider(root,rig,cameraState,height,col);
     const interactable=root.createComponent(Interactable.getTypeName()) as Interactable;
     interactable.targetingMode=3;
     interactable.onTriggerStart.add(e=>{
@@ -1031,6 +1120,8 @@ export class ScoutMain extends BaseScriptComponent {
   private chooseShoot(type:ShootType):void {
     this.shootType=type;this.lastAction=getTime();
     this.palette.setShootType(type);this.placeAudio.play(1);
+    // The camera ghost shows this shoot's rig.
+    this.rebuildPreview();
     this.tips.show("place");
     console.log("Scout shoot type: "+type);
   }
@@ -1132,7 +1223,18 @@ export class ScoutMain extends BaseScriptComponent {
     this.placeAudio.play(1);
     this.palette.setLayouts(this.layouts.list());
     console.log("Scout saved layout "+info.name+" ("+info.count+" items)");
+    // Anchor the layout's frame in the background; once saved, the layout records the anchor's id.
+    this.anchors.saveFrame(frame).then(anchorId=>{
+      if(!anchorId)return;
+      data.a=anchorId;
+      this.layouts.update(info.id,JSON.stringify(data));
+      console.log("Scout anchored layout "+info.name);
+    });
     this.renameLayout(info.id);
+  }
+  /** Deletes the Spatial Anchor of a layout that's being deleted. */
+  private forgetAnchor(id:string):void {
+    try{const a=(JSON.parse(this.layouts.load(id)) as SavedLayout)?.a;if(a)this.anchors.remove(a);}catch(e){}
   }
   /** Replaces what's placed now with a saved layout, arranged around where the user is standing. */
   private loadLayout(id:string):void {
@@ -1162,14 +1264,30 @@ export class ScoutMain extends BaseScriptComponent {
       poster.getTransform().setWorldRotation(quat.angleAxis(frame.yaw+p.r,vec3.up()));
       items.push({so:poster,x:p.x,z:p.z,r:p.r});
     }
+    const o=Array.isArray(data.o)&&data.o.length>=6&&data.o.length%2===0?data.o:null;
+    const pts:vec2[]=[];if(o)for(let i=0;i<o.length;i+=2)pts.push(new vec2(o[i],o[i+1]));
     // Saved against a room outline: show it where the layout landed and let the user line it up with the
     // real walls; everything follows the outline live (followOutline) until they tap Done.
-    const o=Array.isArray(data.o)&&data.o.length>=6&&data.o.length%2===0?data.o:null;
-    if(o){
-      const pts:vec2[]=[];for(let i=0;i<o.length;i+=2)pts.push(new vec2(o[i],o[i+1]));
+    const lineUp=()=>{
+      if(!o)return;
       this.aligning=items;
       this.roomOutline.align(pts,frame,()=>{this.aligning=null;this.outlineConfirmed=true;this.lastAction=getTime();});
-    }
+    };
+    // With a Spatial Anchor, first give Specs a moment to recognise the room: found, everything snaps to
+    // exactly where it was saved; not found (or no anchors, as in the preview), the outline step above.
+    this.anchors.release();
+    if(typeof data.a==="string"&&this.anchorModule){
+      this.showHint("Finding this room…");
+      this.anchors.find(data.a,ANCHOR_WAIT_SECONDS,(s,fn)=>this.schedule(s,fn),found=>{
+        this.placeItems(items,found);
+        if(o){this.roomOutline.adopt(pts,found);this.outlineConfirmed=true;}
+        this.showHint("Back where you left it");this.placeAudio.play(1);
+        console.log("Scout placed layout "+id+" from its anchor");
+      },()=>{
+        if(o)this.showHint("Couldn't recognise the room — line it up by hand");
+        lineUp();
+      });
+    }else lineUp();
     this.sequence=Math.max(this.sequence,...data.m.map(m=>Number(m.l.match(/(\d+)$/)?.[1])||0));
     this.refresh();this.placeAudio.play(1);
     console.log("Scout loaded layout "+id+" ("+data.m.length+" markers, "+data.p.length+" posters)");
@@ -1177,12 +1295,16 @@ export class ScoutMain extends BaseScriptComponent {
   /** While lining up a loaded layout: re-places each item in the outline's current frame (height kept). */
   private followOutline():void {
     if(!this.aligning)return;
-    const f=this.roomOutline.frame;
     this.aligning=this.aligning.filter(it=>!isNull(it.so));
-    for(const it of this.aligning){
+    this.placeItems(this.aligning,this.roomOutline.frame);
+  }
+  /** Re-places loaded items (saved x/z/yaw relative to a layout frame) in `frame`, keeping their height. */
+  private placeItems(items:{so:SceneObject;x:number;z:number;r:number}[],frame:AnchorFrame):void {
+    for(const it of items){
+      if(isNull(it.so))continue;
       const t=it.so.getTransform();
-      t.setWorldPosition(this.fromFrame(f,it.x,it.z,t.getWorldPosition().y));
-      t.setWorldRotation(quat.angleAxis(f.yaw+it.r,vec3.up()));
+      t.setWorldPosition(this.fromFrame(frame,it.x,it.z,t.getWorldPosition().y));
+      t.setWorldRotation(quat.angleAxis(frame.yaw+it.r,vec3.up()));
     }
   }
   /** Names a saved layout by voice: the name updates live as it's heard and is kept once the user pauses.

@@ -87,6 +87,18 @@ export class ScoutRoomOutline {
     this.start("align",onDone);
   }
 
+  /** Takes on a known outline and frame without showing anything (a layout restored from its anchor),
+   * so later saves this session reuse it. */
+  adopt(points:vec2[],frame:OutlineFrame):void {
+    this.ensureRoot();
+    this.pts=points.map(p=>new vec2(p.x,p.y));
+    const t=this.root.getTransform();
+    t.setWorldPosition(new vec3(frame.origin.x,this.floorY(),frame.origin.z));
+    t.setWorldRotation(quat.angleAxis(frame.yaw,vec3.up()));
+    this.redraw(false);
+    this.root.enabled=false;
+  }
+
   update():void {
     if(!this.mode)return;
     if(this.ui&&!isNull(this.ui))followView(this.ui,this.camera,PANEL_DISTANCE,PANEL_DROP,3);

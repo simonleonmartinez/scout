@@ -7,7 +7,7 @@
     - !<own> a7ed2ca6-9ef4-4f3d-95c9-207d0d9620dc
     - !<own> fb84d0dd-f7e5-48fc-962d-339d5fcae84d
     - !<own> e87ba2c5-df96-4ffb-b321-fe15b5f51cba
-    - !<own> 389be8e9-91ec-4ee7-a47a-507f82a5dea4
+    - !<own> b74ebe48-e035-4d4d-be4e-2d32c03c1d55
   layers: !<Layers/267ee9a7-aff2-4f9d-9a49-f71214747d03>
     userLayers:
       - id: 1
@@ -535,6 +535,22 @@
   ScriptTypes:
     "":
       {}
+- !<ScriptComponent/2d58e1f6-eafd-4dab-9724-885dcc1c8c3b>
+  PrefabRemaps:
+    []
+  Name: AgentInspectScript
+  Enabled: true
+  ScriptAsset: !<reference> 0b25079c-f5bf-4c6d-96c4-f43b89dfa213
+  ScriptInputsDefault:
+    {}
+  ScriptTypesDefault:
+    {}
+  ScriptInputs:
+    "":
+      {}
+  ScriptTypes:
+    "":
+      {}
 - !<SceneObject/318a8308-fd9b-4408-b16d-446ab501cd10>
   PrefabRemaps:
     []
@@ -646,22 +662,6 @@
     - !<own> bd966e17-6eb2-40f5-9531-f3fd68bef4bd
   Components:
     []
-- !<SceneObject/389be8e9-91ec-4ee7-a47a-507f82a5dea4>
-  PrefabRemaps:
-    []
-  Name: AiPreviewAgent Handler
-  Enabled: true
-  Layers: 1
-  LocalTransform: !<TransformEntity>
-    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
-    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
-    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
-    HasSegmentScaleCompensation: false
-  Children:
-    []
-  Components:
-    - !<own> 603bb734-03b8-45e0-916f-693fbf3e1acb
-    - !<own> 7d99d531-8584-4467-939e-4edc476db6c0
 - !<SceneObject/3b82f465-5a0d-4b52-b783-7b5aeecc100b>
   PrefabRemaps:
     []
@@ -870,22 +870,6 @@
     - !<own> 4a478f75-8b10-4fd3-ad06-720b354df4fe
   Components:
     []
-- !<ScriptComponent/603bb734-03b8-45e0-916f-693fbf3e1acb>
-  PrefabRemaps:
-    []
-  Name: AgentInspectScript
-  Enabled: true
-  ScriptAsset: !<reference> 0b25079c-f5bf-4c6d-96c4-f43b89dfa213
-  ScriptInputsDefault:
-    {}
-  ScriptTypesDefault:
-    {}
-  ScriptInputs:
-    "":
-      {}
-  ScriptTypes:
-    "":
-      {}
 - !<SceneObject/65b72003-f15a-4901-9b58-ce7bf358a154>
   PrefabRemaps:
     []
@@ -1055,22 +1039,7 @@
   ScriptTypes:
     "":
       {}
-- !<SceneObject/7d11ba42-964e-42ee-b1f5-1716ff5637a3>
-  PrefabRemaps:
-    []
-  Name: pinky-0
-  Enabled: true
-  Layers: 1
-  LocalTransform: !<TransformEntity>
-    Position: {x: -0.000007, y: 11.453500, z: 0.000008}
-    Rotation: {x: 1.584790, y: -17.344000, z: -21.859100}
-    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
-    HasSegmentScaleCompensation: false
-  Children:
-    - !<own> b6575e88-c7a3-41a6-8536-26ed86f32e78
-  Components:
-    []
-- !<ScriptComponent/7d99d531-8584-4467-939e-4edc476db6c0>
+- !<ScriptComponent/7c4e6908-a0fe-44be-bee6-b78cc449d9e8>
   PrefabRemaps:
     []
   Name: AgentInteractScript
@@ -1086,6 +1055,21 @@
   ScriptTypes:
     "":
       {}
+- !<SceneObject/7d11ba42-964e-42ee-b1f5-1716ff5637a3>
+  PrefabRemaps:
+    []
+  Name: pinky-0
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: -0.000007, y: 11.453500, z: 0.000008}
+    Rotation: {x: 1.584790, y: -17.344000, z: -21.859100}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    - !<own> b6575e88-c7a3-41a6-8536-26ed86f32e78
+  Components:
+    []
 - !<SceneObject/7e333b63-7aa7-47cd-a7cf-e42ed13186c9>
   PrefabRemaps:
     []
@@ -1896,6 +1880,22 @@
     - !<own> 9b272f1f-a38f-4ef3-b568-e054e96fcfe8
   Components:
     []
+- !<SceneObject/b74ebe48-e035-4d4d-be4e-2d32c03c1d55>
+  PrefabRemaps:
+    []
+  Name: AiPreviewAgent Handler
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 2d58e1f6-eafd-4dab-9724-885dcc1c8c3b
+    - !<own> 7c4e6908-a0fe-44be-bee6-b78cc449d9e8
 - !<SceneObject/b8681d8a-4f2d-45ce-834a-68be9076949d>
   PrefabRemaps:
     []
@@ -2670,11 +2670,19 @@
       sfxVolume: 0.250000
       connectedLensModule: !<reference.ConnectedLensModule> 6850a1d4-ed92-419f-91c9-198f3e16ae2f
       cloudStorageModule: !<reference.CloudStorageModule> fc12b1c4-e52d-4334-ad8f-cb88153dd421
+      anchorModule: !<reference.AnchorModule> 4ecd5df2-d1f2-4a68-8309-b4e5db768306
       cameraPrefab: !<reference.ObjectPrefab> a8d16f6b-67d2-4c0a-8a67-0653fba6f125
       lightPrefab: !<reference.ObjectPrefab> 8a4d422b-8fad-4cdc-9f95-c0a9a30a6027
       standingPrefab: !<reference.ObjectPrefab> ef8de357-600f-4e3e-bf56-86e692a66f9d
       seatedPrefab: !<reference.ObjectPrefab> 52dada4a-a82e-4212-bfd1-bc72b650c41f
       workbenchPrefab: !<reference.ObjectPrefab> e146f070-abf6-4b90-8a49-1fad9d861877
+      classicRig: !<reference.ObjectPrefab[]>
+        - !<reference> fa18e9a9-c3b0-4aa6-9d6c-ee52baeda6ca
+        - !<reference> 078004d3-4dc4-498e-9e1a-ea9dd8e343c5
+        - !<reference> 85f8806e-cf66-478a-a62f-456b1aec8ba1
+      cameraBodies: !<reference.ObjectPrefab[]>
+        - !<reference> 77e13d9b-2ab7-474b-8e9e-cf08eedde933
+        - !<reference> 29bee347-d5f3-4093-911d-18cdd936eb7a
       cinemaCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       gimbalPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       lensPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000

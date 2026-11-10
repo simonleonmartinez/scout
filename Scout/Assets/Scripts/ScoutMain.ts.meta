@@ -28,10 +28,13 @@
   ExportUid: 00000000-0000-0000-0000-000000000000
   PackagePolicy: CanBeUnpacked
   ScriptInputsHidden:
+    anchorModule: false
     camera: false
+    cameraBodies: false
     cameraPrefab: false
     cinemaCameraPrefab: false
     clapperboardPrefab: false
+    classicRig: false
     cloudStorageModule: false
     connectedLensModule: false
     debugColliders: false
@@ -70,11 +73,16 @@
       sfxVolume: 0.250000
       connectedLensModule: !<reference.ConnectedLensModule> 00000000-0000-0000-0000-000000000000
       cloudStorageModule: !<reference.CloudStorageModule> 00000000-0000-0000-0000-000000000000
+      anchorModule: !<reference.AnchorModule> 00000000-0000-0000-0000-000000000000
       cameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       lightPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       standingPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       seatedPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       workbenchPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
+      classicRig: !<reference.ObjectPrefab[]>
+        []
+      cameraBodies: !<reference.ObjectPrefab[]>
+        []
       cinemaCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       gimbalPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       lensPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
@@ -96,11 +104,14 @@
     - '// @input float sfxVolume = 0.25 {"hint":"Volume of select and placement cues", "widget":"slider", "min":0, "max":1, "step":0.05}'
     - // @input Asset.ConnectedLensModule connectedLensModule
     - // @input Asset.CloudStorageModule cloudStorageModule
+    - '// @input Asset.AnchorModule anchorModule {"hint":"Spatial Anchors: saved layouts snap back into the same room"}'
     - // @input Asset.ObjectPrefab cameraPrefab
     - // @input Asset.ObjectPrefab lightPrefab
     - // @input Asset.ObjectPrefab standingPrefab
     - // @input Asset.ObjectPrefab seatedPrefab
     - // @input Asset.ObjectPrefab workbenchPrefab
+    - '// @input Asset.ObjectPrefab[] classicRig {"hint":"Camera tripod parts: legs, column, head"}'
+    - '// @input Asset.ObjectPrefab[] cameraBodies {"hint":"Camera bodies: cinema, photo"}'
     - // @input Asset.ObjectPrefab cinemaCameraPrefab
     - // @input Asset.ObjectPrefab gimbalPrefab
     - // @input Asset.ObjectPrefab lensPrefab

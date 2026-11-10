@@ -47,6 +47,12 @@ export class ScoutLayoutStore {
     const key=LAYOUT_KEY_PREFIX+id;
     return this.store.has(key)?this.store.getString(key):null;
   }
+  /** Rewrites a saved layout's data in place (e.g. adding its anchor id once that's been saved). */
+  update(id:string,data:string):void {
+    const key=LAYOUT_KEY_PREFIX+id;
+    if(!this.store.has(key))return;
+    try{this.store.putString(key,data);}catch(e){console.warn("Scout layouts: update failed — "+e);}
+  }
   rename(id:string,name:string):void {
     this.writeIndex(this.list().map(l=>l.id===id?{...l,name}:l));
   }
