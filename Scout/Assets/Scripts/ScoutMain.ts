@@ -163,6 +163,8 @@ const GLOW_OFFSET=new vec3(0.009,0.25,0.038);
 const GLOW_RADIUS=0.016;
 const TOOL_NAMES=["Camera","Light","Note","Standing","Seated"];
 const PALETTE_DISTANCE=110;
+// The open menu (~70 cm tall) sits a little further out so it fits the view with some margin.
+const PALETTE_OPEN_DISTANCE=125;
 const PALETTE_HEIGHT_OFFSET=-14;
 const PALETTE_FOLLOW_EASE=4;
 const PALETTE_COLLAPSED_SIDE_OFFSET=20; // shifts the collapsed toolbar toward the right edge of view instead of dead center
@@ -771,7 +773,11 @@ export class ScoutMain extends BaseScriptComponent {
     this.prevCameraPos=camPos;
     const forward=camT.forward.uniformScale(-1);
     const side=this.palette.isCollapsed?camT.left.uniformScale(-PALETTE_COLLAPSED_SIDE_OFFSET):vec3.zero();
-    const target=camPos.add(forward.uniformScale(PALETTE_DISTANCE)).add(new vec3(0,PALETTE_HEIGHT_OFFSET,0)).add(side);
+    // The small collapsed bar sits low and to the right; the open menu (~70 cm tall) is centred on the gaze
+    // so it fits the glasses' view top to bottom.
+    const drop=this.palette.isCollapsed?PALETTE_HEIGHT_OFFSET:0;
+    const distance=this.palette.isCollapsed?PALETTE_DISTANCE:PALETTE_OPEN_DISTANCE;
+    const target=camPos.add(forward.uniformScale(distance)).add(new vec3(0,drop,0)).add(side);
     const ease=Math.min(1,getDeltaTime()*PALETTE_FOLLOW_EASE);
     const pos=this.paletteTransform.getWorldPosition();
     this.paletteTransform.setWorldPosition(pos.add(target.sub(pos).uniformScale(ease)));

@@ -1,4 +1,4 @@
-import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {Interactable,TargetingPriority} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {Interactor} from "SpectaclesInteractionKit.lspkg/Core/Interactor/Interactor";
 import {addHoverFeedback} from "./ScoutHover";
 import {buildLathe} from "./ScoutMarkerMesh";
@@ -9,7 +9,11 @@ import {placeInView,followView,child,panel,text,image,sweepColliders,pillButton,
 export type OutlineFrame={origin:vec3;yaw:number};
 
 // New outlines start as a square this size (cm) centred on the user, squared to where they face.
-const DEFAULT_HALF=150;
+// The starting outline is a 1.2 m square just ahead of the user (from 1 m out), so all four corners are in front
+// of them and fit in one downward glance in Specs' narrow view (the user then drags them out to the walls);
+// a 3 m square centred on them left two corners
+// behind and the rest well outside the view. (Local -Z is ahead: the frame faces the camera's forward.)
+const DEFAULT_HALF=60,DEFAULT_NEAR=100;
 const LINE_WIDTH=3,LIFT=0.8;
 const CORNER_RADIUS=7,PLUS_RADIUS=5,PUCK_RADIUS=9,HIT_SIZE=22;
 // The turn puck sits this far beyond the outline's farthest corner from its centre.
@@ -23,7 +27,9 @@ const MOVE_ICON=requireAsset("../Icons/pan_tool.png") as Texture;
 const TURN_ICON=requireAsset("../Icons/rotate_right.png") as Texture;
 const FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 // Instruction panel, like the tips: out in front, a little below eye line, readable at that distance.
-const PANEL_DISTANCE=120,PANEL_DROP=34,PANEL_SCALE=1.2,PANEL_W=70,PANEL_H=30;
+// At arm's length (~28 cm wide) so it fits Specs' narrow view and its buttons are in reach. It follows
+// turning but not looking down, so it never sits on the outline being dragged on the floor.
+const PANEL_DISTANCE=55,PANEL_DROP=12,PANEL_SCALE=0.4,PANEL_W=70,PANEL_H=30;
 const TITLE_SIZE=150,BODY_SIZE=110,BUTTON_SIZE=110;
 
 type Drag={interactor:Interactor;kind:"corner"|"move"|"turn";index:number;
@@ -72,8 +78,8 @@ export class ScoutRoomOutline {
       this.ensureRoot();
       this.root.getTransform().setWorldPosition(new vec3(p.x,this.floorY(),p.z));
       this.root.getTransform().setWorldRotation(quat.angleAxis(Math.atan2(f.x,f.z),vec3.up()));
-      const h=DEFAULT_HALF;
-      this.pts=[new vec2(-h,-h),new vec2(h,-h),new vec2(h,h),new vec2(-h,h)];
+      const h=DEFAULT_HALF,near=-DEFAULT_NEAR,far=-DEFAULT_NEAR-2*DEFAULT_HALF;
+      this.pts=[new vec2(-h,far),new vec2(h,far),new vec2(h,near),new vec2(-h,near)];
     }
     this.start("define",onDone);
   }
@@ -281,6 +287,9 @@ export class ScoutRoomOutline {
     const shape=Shape.createBoxShape();shape.size=new vec3(Math.max(HIT_SIZE,radius*2.4),12,Math.max(HIT_SIZE,radius*2.4));col.shape=shape;
     const input=so.createComponent(Interactable.getTypeName()) as Interactable;
     input.targetingMode=3;
+    // Handles lie on the floor among the placed props: without priority, a pinch aimed at a corner lands
+    // on the camera or light standing in front of it instead.
+    input.targetingPriority=TargetingPriority.High;
     addHoverFeedback(input,top);
     return so;
   }

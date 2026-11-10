@@ -11,11 +11,12 @@ export const PANEL_TINT=new vec4(0.1,0.1,0.11,1);
 
 // Text sizes are set for reading in glasses, not on a monitor: at these distances the cap height is
 // roughly 2-3cm. Nothing here goes below TIP_BODY.
-// A tip sits well out in front, a little below eye line — at 70cm it filled half the view. TIP_SCALE
-// enlarges it slightly so text stays readable out there (~38° wide); layout below is in unscaled cm.
-const TIP_DISTANCE=110,TIP_DROP=30,TIP_SCALE=1.15,TIP_W=66,TIP_H=22;
+// A tip sits at arm's length, just below the gaze, about 23 cm wide: Specs' view is narrow, and out at
+// 110 cm and 76 cm wide it filled it. TIP_SCALE shrinks the layout below (unscaled cm) to fit; the text
+// sizes are set for that scale so it still reads at least as large as before.
+const TIP_DISTANCE=55,TIP_DROP=8,TIP_SCALE=0.35,TIP_W=66,TIP_H=22;
 const TIP_TITLE=150,TIP_BODY=110;
-const CLOSE_SIZE=6;
+const CLOSE_SIZE=9;
 const TIP_SECONDS=7,TIP_FOLLOW=3;
 // v2: the intro moved onto the bench, so it shows once more for anyone who saw the old cards.
 const INTRO_KEY="scout.intro.v2.seen",TIPS_KEY="scout.tips.seen";
@@ -74,7 +75,7 @@ export class ScoutTips {
     }
     if(this.current&&(isNull(this.current.root)||getTime()>this.current.until))this.hide();
     if(!this.current&&this.queue.length)this.present(this.queue.shift());
-    if(this.current)followView(this.current.root,this.camera,TIP_DISTANCE,TIP_DROP,TIP_FOLLOW);
+    if(this.current)followGaze(this.current.root,this.camera,TIP_DISTANCE,TIP_DROP,TIP_FOLLOW);
   }
 
   private present(id:string):void {
@@ -82,7 +83,7 @@ export class ScoutTips {
     if(!tip)return;
     this.markSeen(id);
     const root=global.scene.createSceneObject("Tip "+id);
-    placeInView(root,this.camera,TIP_DISTANCE,TIP_DROP);
+    followGaze(root,this.camera,TIP_DISTANCE,TIP_DROP,TIP_FOLLOW,true);
     root.getTransform().setLocalScale(vec3.one().uniformScale(TIP_SCALE));
     root.createComponent("Component.Canvas");
     panel(root,TIP_W,TIP_H,PANEL_TINT,3);
@@ -139,10 +140,10 @@ export function followView(so:SceneObject,camera:Camera,distance:number,drop:num
 }
 /** Like followView, but tracks the full gaze (looking down at the floor included), so `so` stays in view
  * wherever the user looks; `drop` is below the gaze line. Faces the eyes. With `snap`, jumps there now. */
-export function followGaze(so:SceneObject,camera:Camera,distance:number,drop:number,rate:number,snap=false):void {
+export function followGaze(so:SceneObject,camera:Camera,distance:number,drop:number,rate:number,snap=false,side=0):void {
   const ct=camera.getTransform(),eye=ct.getWorldPosition();
   const gaze=ct.forward.uniformScale(-1).normalize();
-  const goal=eye.add(gaze.uniformScale(distance)).add(ct.up.uniformScale(-drop));
+  const goal=eye.add(gaze.uniformScale(distance)).add(ct.up.uniformScale(-drop)).add(ct.right.uniformScale(side));
   const face=quat.lookAt(eye.sub(goal).normalize(),vec3.up());
   const t=so.getTransform(),k=snap?1:Math.min(1,getDeltaTime()*rate);
   t.setWorldPosition(vec3.lerp(t.getWorldPosition(),goal,k));
