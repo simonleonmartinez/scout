@@ -1,6 +1,7 @@
 import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
 import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
 import {addBackPlateHover} from "./ScoutHover";
+import animate from "SpectaclesInteractionKit.lspkg/Utils/animate";
 
 const FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 // Brand inks: lavender titles (as in the bench header), cream body text, on a dark gear-grey panel.
@@ -171,17 +172,17 @@ const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
 const CLOSE_NAME="Close",BUTTON_NAME="Button";
 const CLOSE_TINT=new vec4(0x3e/255,0x30/255,0x82/255,1);
 /** A small round × button (BackPlate circle with the close icon) that calls `onTap`. */
-function closeButton(so:SceneObject,onTap:()=>void):void {
+function closeButton(so:SceneObject,onTap:()=>void,size=CLOSE_SIZE):void {
   const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
-  back.style="simple";back.size=new vec2(CLOSE_SIZE,CLOSE_SIZE);
+  back.style="simple";back.size=new vec2(size,size);
   back.onInitialized.add(()=>{
-    styleBack(back,CLOSE_TINT,CLOSE_SIZE/2);
+    styleBack(back,CLOSE_TINT,size/2);
     back.interactionPlane.enabled=false;
     back.interactable.onTriggerEnd.add(()=>onTap());
     addBackPlateHover(back,so,CLOSE_TINT);
   });
   const icon=child(so,"Icon",new vec3(0,0,0.3));
-  image(icon,CLOSE_ICON,CLOSE_SIZE*0.55,CLOSE_SIZE*0.55,BODY_INK);
+  image(icon,CLOSE_ICON,size*0.55,size*0.55,BODY_INK);
 }
 /** Panels are read-only apart from their buttons: the panel's own collider would otherwise catch pinches
  * (and hover) meant for whatever is behind it. Close buttons and pill buttons keep theirs. */
@@ -208,4 +209,62 @@ export function pillButton(parent:SceneObject,label:string,pos:vec3,w:number,h:n
     addBackPlateHover(back,so,tint);
   });
   text(so,label,new vec3(0,0,0.4),w-2,h-1,size,BODY_INK);
+}
+
+// Toolkit card: shown once the shoot type is picked on the bench, introducing what can be placed.
+// Shown at arm's length so the × can be reached by hand. Specs' view is narrow, so KIT_SCALE keeps it to
+// ~60% of the view wide (~23 cm across at 55 cm); layout below is in unscaled cm, text sized up to match.
+const KIT_DISTANCE=55,KIT_DROP=3,KIT_SCALE=0.27;
+const KIT_W=86,KIT_H=58,KIT_TITLE=175,KIT_LABEL=150,KIT_CLOSE=12;
+const KIT_CARD_W=21,KIT_CARD_H=25,KIT_CARD_GAP=23,KIT_FAN=8,KIT_ICON=11;
+const KIT_CARD_TINT=new vec4(0x24/255,0x1c/255,0x48/255,1);
+const KIT_DEAL=0.22,KIT_STAGGER=0.12;
+export type KitCard={label:string;icon:Texture};
+
+/** "Place gear from your toolkit…" pop-up: a small fanned deck of the things that can be placed, with a ×
+ * to close. It drifts with the view like a tip and closes itself once the user places something. */
+export class ScoutToolkitCard {
+  private root:SceneObject=null;
+  constructor(private camera:Camera,private schedule:(seconds:number,fn:()=>void)=>void){}
+  get active():boolean {return !!this.root&&!isNull(this.root)&&this.root.enabled;}
+  show(title:string,cards:KitCard[]):void {
+    this.close();
+    const root=global.scene.createSceneObject("Toolkit card");
+    placeInView(root,this.camera,KIT_DISTANCE,KIT_DROP);
+    root.getTransform().setLocalScale(vec3.one().uniformScale(KIT_SCALE));
+    root.createComponent("Component.Canvas");
+    panel(root,KIT_W,KIT_H,PANEL_TINT,4);
+    closeButton(child(root,CLOSE_NAME,new vec3(KIT_W/2-KIT_CLOSE/2-2,KIT_H/2-KIT_CLOSE/2-2,0.6)),()=>this.close(),KIT_CLOSE);
+    text(root,title,new vec3(0,KIT_H/2-13,0.5),KIT_W-2*KIT_CLOSE-6,16,KIT_TITLE,TITLE_INK);
+    // The deck: fanned out from the middle card, outer cards tipped and dropped a little.
+    const mid=(cards.length-1)/2;
+    cards.forEach((card,i)=>{
+      const k=i-mid;
+      const so=child(root,"Card "+card.label,new vec3(k*KIT_CARD_GAP,-9-Math.abs(k)*1.5,0.5+i*0.05));
+      const t=so.getTransform();
+      t.setLocalRotation(quat.angleAxis(-k*KIT_FAN*Math.PI/180,vec3.forward()));
+      panel(so,KIT_CARD_W,KIT_CARD_H,KIT_CARD_TINT,2.5);
+      image(child(so,"Icon",new vec3(0,3.5,0.3)),card.icon,KIT_ICON,KIT_ICON,TITLE_INK);
+      text(so,card.label,new vec3(0,-7.5,0.3),KIT_CARD_W-2,6,KIT_LABEL,BODY_INK);
+      // Dealt in one at a time.
+      t.setLocalScale(vec3.one().uniformScale(0.01));
+      this.schedule(0.15+i*KIT_STAGGER,()=>{
+        if(isNull(so))return;
+        animate({duration:KIT_DEAL,easing:"ease-out-back",update:p=>{if(!isNull(so))t.setLocalScale(vec3.one().uniformScale(Math.max(0.01,p)));}});
+      });
+    });
+    sweepColliders(root,this.schedule);
+    this.root=root;
+  }
+  /** Hides it now and destroys it a moment later (never inside the × button's own callback). */
+  close():void {
+    const root=this.root;
+    this.root=null;
+    if(!root||isNull(root))return;
+    root.enabled=false;
+    this.schedule(0.5,()=>{if(!isNull(root))root.destroy();});
+  }
+  update():void {
+    if(this.active)followView(this.root,this.camera,KIT_DISTANCE,KIT_DROP,TIP_FOLLOW);
+  }
 }

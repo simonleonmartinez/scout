@@ -18,7 +18,7 @@ import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
 import {ScoutWorkbench,ShootType} from "./ScoutWorkbench";
 import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
 import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
-import {ScoutTips,IntroCard,Tip,introSeen,markIntroSeen} from "./ScoutOnboarding";
+import {ScoutTips,ScoutToolkitCard,KitCard,IntroCard,Tip,introSeen,markIntroSeen} from "./ScoutOnboarding";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
 import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
 import {BodyKind,CameraRig,HeightSlider,RigPrefabs,TiltWheel,rigHeight} from "./ScoutCameraRig";
@@ -67,6 +67,15 @@ const INTRO_CARDS:IntroCard[]=[
   {title:"Save it for later.",body:"Come back with your crew and your plan is waiting where you left it."},
 ];
 // One-time tips, each shown the first time its action becomes useful (see the tips.show calls).
+// Toolkit card shown after the shoot type is picked on the bench.
+const KIT_TITLE="Place gear from your toolkit\nto organize your next shoot";
+const KIT_CARDS:KitCard[]=[
+  {label:"Camera",icon:requireAsset("../Icons/videocam.png") as Texture},
+  {label:"Light",icon:requireAsset("../Icons/lightbulb.png") as Texture},
+  {label:"Subject",icon:requireAsset("../Icons/dummy_face.png") as Texture},
+];
+// Lets the bench clear away first (s).
+const KIT_DELAY=0.6;
 const TIPS:{[id:string]:Tip}={
   place:{title:"Point and pinch",body:"to drop it on the floor.",icon:requireAsset("../Icons/arrow_forward.png") as Texture},
   grab:{title:"Grab it like a real object.",body:"Close your hand to pick it up, open to put it down.",icon:requireAsset("../Icons/pan_tool.png") as Texture},
@@ -260,6 +269,7 @@ export class ScoutMain extends BaseScriptComponent {
   private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:CameraRig;wheel:TiltWheel}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
+  private toolkitCard:ScoutToolkitCard;
   // Room outline that saved layouts are stored against; confirmed once drawn (or lined up) this session.
   private roomOutline:ScoutRoomOutline;
   private outlineConfirmed=false;
@@ -302,7 +312,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.workbench=new ScoutWorkbench(this.markerMaterial,this.camera,{
       bench:this.workbenchPrefab,cinemaCamera:this.cinemaCameraPrefab,gimbal:this.gimbalPrefab,lens:this.lensPrefab,
       clapperboard:this.clapperboardPrefab,filmReel:this.filmReelPrefab,photoCamera:this.photoCameraPrefab,
-    },type=>this.chooseShoot(type));
+    },type=>this.chooseShoot(type,true));
     this.grabMove=new ScoutGrabMove(this.camera,{
       target:()=>{
         // The prop under the cursor — or the one there a moment ago, since the targeting ray drifts as
@@ -339,6 +349,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.posterGhost=buildPoster(this.markerMaterial,true);this.posterGhost.enabled=false;
     this.palette.onPinPoster.add(()=>{this.lastAction=getTime();this.pending=null;this.pinningPoster=true;this.wallHit=null;});
     this.tips=new ScoutTips(this.camera,TIPS,(s,fn)=>this.schedule(s,fn));
+    this.toolkitCard=new ScoutToolkitCard(this.camera,(s,fn)=>this.schedule(s,fn));
     this.anchors=new ScoutAnchors(this.anchorModule||null);
     this.roomOutline=new ScoutRoomOutline(this.markerMaterial,this.camera,
       ()=>this.floorY===null?this.camera.getTransform().getWorldPosition().y-150:this.floorY,
@@ -442,11 +453,13 @@ export class ScoutMain extends BaseScriptComponent {
       this.workbench.show(this.floorY,{cards:INTRO_CARDS,onDone:()=>{markIntroSeen();this.lastAction=getTime();}},!introSeen(),this.floorSetup.spot);
     }
     const settingUp=!this.floorSetup.done||(benchWaiting&&!this.workbenchShown)||this.workbench.active;
-    this.tips.held=this.roomOutline.active||this.angleCapture.guiding;
+    // The toolkit card goes first; the "point and pinch" tip waits until it's closed.
+    this.tips.held=this.roomOutline.active||this.angleCapture.guiding||this.toolkitCard.active;
     this.tips.update();
+    this.toolkitCard.update();
     // The menu also steps aside while the room outline is drawn or lined up: it would sit in front of the
     // outline panel and its buttons.
-    const hideMenu=settingUp||this.roomOutline.active;
+    const hideMenu=settingUp||this.roomOutline.active||this.toolkitCard.active;
     if(this.paletteShown===hideMenu){this.paletteShown=!hideMenu;this.palette.sceneObject.enabled=!hideMenu;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
@@ -830,6 +843,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.placeAudio.play(1);this.refresh();
     console.log("Scout placed "+label);
     this.tips.done("place");
+    this.toolkitCard.close();
     if(kind===0||kind===1)this.tips.show("dials");
     if(kind===0)this.tips.show("capture");
     if(kind===2)this.tips.show("note");
@@ -1132,11 +1146,13 @@ export class ScoutMain extends BaseScriptComponent {
     this.cameraStates=[];this.lightStates=[];this.lightRefs=[];this.noteStates=[];
     this.selectAudio.play(1);this.refresh();console.log("Scout cleared");
   }
-  private chooseShoot(type:ShootType):void {
+  /** `fromBench`: the user just picked it on the bench (not restored from a layout), so introduce the toolkit. */
+  private chooseShoot(type:ShootType,fromBench=false):void {
     this.shootType=type;this.lastAction=getTime();
     this.palette.setShootType(type);this.placeAudio.play(1);
     // The camera ghost shows this shoot's rig.
     this.rebuildPreview();
+    if(fromBench)this.schedule(KIT_DELAY,()=>this.toolkitCard.show(KIT_TITLE,KIT_CARDS));
     this.tips.show("place");
     console.log("Scout shoot type: "+type);
   }
