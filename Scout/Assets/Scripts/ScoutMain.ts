@@ -21,7 +21,7 @@ import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
 import {ScoutTips,IntroCard,Tip,introSeen,markIntroSeen} from "./ScoutOnboarding";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
 import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
-import {BodyKind,CameraRig,HeightSlider,RigPrefabs,rigHeight} from "./ScoutCameraRig";
+import {BodyKind,CameraRig,HeightSlider,RigPrefabs,TiltWheel,rigHeight} from "./ScoutCameraRig";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
@@ -257,7 +257,7 @@ export class ScoutMain extends BaseScriptComponent {
   // Each marker's floating UI pivot, turned to face the user (angle/target in radians about +Y).
   private facingUI:{root:SceneObject;pivot:SceneObject;facing:vec3;angle:number;target:number}[]=[];
   /** Camera props' height sliders: shown beside the prop only while it's in edit mode. */
-  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject}[]=[];
+  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:CameraRig;wheel:TiltWheel}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
   // Room outline that saved layouts are stored against; confirmed once drawn (or lined up) this session.
@@ -882,23 +882,38 @@ export class ScoutMain extends BaseScriptComponent {
       state.lift=Math.round(rig.lift*10)/10;
       fit();
     };
+    const touched=()=>{this.lastAction=getTime();};
+    const wheel=new TiltWheel(rig,this.wheelMaterial(),this.camera,deg=>{
+      rig.setTilt(deg);state.tilt=Math.round(rig.tiltAngle);
+    },touched);
     const pick=(kind:BodyKind)=>{
       if(kind===rig.body)return;
       rig.setBody(kind);state.body=kind;fit();
+      wheel.rebuild(this.wheelMaterial());
       this.selectAudio.play(1);
     };
-    const slider=new HeightSlider(pivot,pos,this.camera,()=>rig.lift,apply,()=>{this.lastAction=getTime();},rig.body,pick);
+    const slider=new HeightSlider(pivot,pos,this.camera,()=>rig.lift,apply,touched,rig.body,pick);
     slider.root.getTransform().setLocalRotation(quat.lookAt(facing,vec3.up()));
-    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null});
+    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null,rig,wheel});
     apply(rig.lift);
   }
-  /** Each slider shows only while its prop is in edit mode, turned with that prop's floating UI. */
+  /** One shared material for the tilt wheels (vertex-coloured, like the gizmo's handles). */
+  private tiltWheelMaterial:Material=null;
+  private wheelMaterial():Material {
+    if(!this.tiltWheelMaterial)this.tiltWheelMaterial=this.markerMaterial.clone();
+    return this.tiltWheelMaterial;
+  }
+  /** Each camera's height slider and tilt wheel show only while it's in edit mode (or mid-drag), so
+   * moving the camera can never change its height or tilt by accident. */
   private updateHeightSliders():void {
     this.heightSliders=this.heightSliders.filter(h=>!isNull(h.root)&&!isNull(h.pivot));
     for(const h of this.heightSliders){
-      const show=this.gizmo.isEditing(h.root)||h.slider.dragging;
+      const editing=this.gizmo.isEditing(h.root);
+      const show=editing||h.slider.dragging;
       if(h.slider.root.enabled!==show)h.slider.root.enabled=show;
       if(show&&h.facingPivot&&!isNull(h.facingPivot))h.pivot.getTransform().setLocalRotation(h.facingPivot.getTransform().getLocalRotation());
+      const wheel=editing||h.wheel.dragging;
+      if(h.wheel.root.enabled!==wheel)h.wheel.root.enabled=wheel;
     }
   }
   private prefabFor(kind:number):ObjectPrefab {return [this.cameraPrefab,this.lightPrefab,null,this.standingPrefab,this.seatedPrefab][kind];}
@@ -920,7 +935,7 @@ export class ScoutMain extends BaseScriptComponent {
     if(bodyKind){
       const holder=global.scene.createSceneObject("Rig");holder.setParent(body);
       holder.getTransform().setLocalPosition(new vec3(0,-height/2,0));
-      rig=new CameraRig(holder,this.rigPrefabs(),bodyKind,cameraState.lift||0);
+      rig=new CameraRig(holder,this.rigPrefabs(),bodyKind,cameraState.lift||0,cameraState.tilt||0);
       this.pivotAtFeet(root,body);
     }else if(prefab){
       const model=prefab.instantiate(body),t=model.getTransform();

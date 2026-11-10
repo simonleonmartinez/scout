@@ -12,7 +12,8 @@ import type {SavedLayoutInfo} from "./ScoutLayoutStore";
 import {CameraAssetState, LightAssetState, NoteAssetState, ISO_STOPS, APERTURE_STOPS, SHUTTER_STOPS, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
 
 const ICONS: Texture[] = [requireAsset("../Icons/videocam.png") as Texture, requireAsset("../Icons/lightbulb.png") as Texture, requireAsset("../Icons/sticky_note_2.png") as Texture, requireAsset("../Icons/undo.png") as Texture, requireAsset("../Icons/delete.png") as Texture];
-const ACTOR_ICONS:Texture[]=[requireAsset("../Icons/person.png") as Texture,requireAsset("../Icons/chair.png") as Texture];
+// The subject icon is the Violet dummy's face (Icons/dummy_face.png).
+const ACTOR_ICONS:Texture[]=[requireAsset("../Icons/dummy_face.png") as Texture,requireAsset("../Icons/chair.png") as Texture];
 const HAND_ICON=requireAsset("../Icons/pan_tool.png") as Texture;
 const RESET_FLOOR_ICON=requireAsset("../Icons/restart_alt.png") as Texture;
 const LAYOUTS_ICON=requireAsset("../Icons/bookmarks.png") as Texture;

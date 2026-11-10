@@ -22,7 +22,9 @@ export type CameraAssetState={isoIndex:number;apertureIndex:number;shutterIndex:
   /** Which camera sits on the tripod ("cinema" | "photo"); unset picks the shoot type's default. */
   body?:string;
   /** How far the centre column is raised, cm. */
-  lift?:number};
+  lift?:number;
+  /** Camera tilt, degrees (up is positive). */
+  tilt?:number};
 /** Light Asset state — brightness/CCT dial positions for one placed Light marker. Both fields drive the
  * marker's real-time LightSource (see ScoutMain.applyLightLook). */
 export type LightAssetState={intensityIndex:number;kelvinIndex:number};
