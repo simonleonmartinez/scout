@@ -138,6 +138,8 @@ const MODEL_HEIGHTS=[145,165,30,170,125];
 const SLIDER_OUT=14,SLIDER_SIDE=30,SLIDER_Y=28;
 // Lights' sliders sit lower, beside the pole, clear of the wide softbox above.
 const LIGHT_SLIDER_Y=-6;
+// Occlusion: the occluder renders first; its on/off setting is remembered per device.
+const OCCLUDER_RENDER_ORDER=-100,OCCLUSION_KEY="scout.occlusion";
 // Key light rig: local offset from the model's pivot to the softbox opening, in the model's own raw
 // mesh units (meters) — a child's local position is carried through the SAME transform that maps the
 // mesh's own vertices to world space, so using the mesh's own coordinates directly (not re-scaled)
@@ -199,6 +201,8 @@ export class ScoutMain extends BaseScriptComponent {
   @input @hint("Camera tripod parts: legs, column, head") classicRig:ObjectPrefab[];
   @input @hint("Camera bodies: cinema, photo") cameraBodies:ObjectPrefab[];
   @input @hint("Light stand parts: base, pole, upper pole, softbox head") lightRig:ObjectPrefab[];
+  @input @allowUndefined @hint("World Mesh: the real room's reconstructed surfaces, for occlusion") worldMesh:RenderMesh;
+  @input @allowUndefined @hint("Occluder material: writes depth only, so real objects hide what's behind them") occluderMaterial:Material;
   @input @allowUndefined cinemaCameraPrefab:ObjectPrefab;
   @input @allowUndefined gimbalPrefab:ObjectPrefab;
   @input @allowUndefined lensPrefab:ObjectPrefab;
@@ -314,6 +318,8 @@ export class ScoutMain extends BaseScriptComponent {
     this.buildHoverHalo();
     this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>this.confirmFloor(y));
     this.palette.onResetFloor.add(()=>this.resetFloor());
+    this.setupOcclusion();
+    this.palette.onToggleOcclusion.add(()=>{this.lastAction=getTime();this.setOcclusion(!this.occlusionOn);this.selectAudio.play(1);});
     this.workbench=new ScoutWorkbench(this.markerMaterial,this.camera,{
       bench:this.workbenchPrefab,cinemaCamera:this.cinemaCameraPrefab,gimbal:this.gimbalPrefab,lens:this.lensPrefab,
       clapperboard:this.clapperboardPrefab,filmReel:this.filmReelPrefab,photoCamera:this.photoCameraPrefab,
@@ -944,6 +950,34 @@ export class ScoutMain extends BaseScriptComponent {
       const wheel=editing||h.wheel.dragging;
       if(h.wheel.root.enabled!==wheel)h.wheel.root.enabled=wheel;
     }
+  }
+  /** Occlusion: the World Mesh (the room as Specs reconstructs it) drawn with a depth-only occluder, so
+   * props, actors and their UI hide behind real furniture and walls. On by default; turning it off (which
+   * also stops reconstructing the room, saving battery) is remembered per device. */
+  private occluder:SceneObject=null;
+  private occluderProvider:WorldRenderObjectProvider=null;
+  private occlusionOn=false;
+  private setupOcclusion():void {
+    if(!this.worldMesh||!this.occluderMaterial)return;
+    this.occluder=global.scene.createSceneObject("World occluder");
+    const visual=this.occluder.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    visual.mesh=this.worldMesh;visual.mainMaterial=this.occluderMaterial;
+    // Drawn before everything else, so its depth is in place when the props render.
+    visual.setRenderOrder(OCCLUDER_RENDER_ORDER);
+    this.occluderProvider=this.worldMesh.control as WorldRenderObjectProvider;
+    // On unless the user has turned it off on this device.
+    let on=true;
+    try{const store=global.persistentStorageSystem.store;if(store.has(OCCLUSION_KEY))on=store.getBool(OCCLUSION_KEY);}catch(e){}
+    this.setOcclusion(on,false);
+  }
+  private setOcclusion(on:boolean,remember=true):void {
+    this.occlusionOn=on;
+    if(this.occluder&&!isNull(this.occluder))this.occluder.enabled=on;
+    // Turning it off also stops reconstructing the room, which is where the battery goes.
+    if(this.occluderProvider)this.occluderProvider.enableWorldMeshesTracking=on;
+    this.palette.setOcclusion(on);
+    if(remember)try{global.persistentStorageSystem.store.putBool(OCCLUSION_KEY,on);}catch(e){}
+    console.log("Scout occlusion "+(on?"on":"off"));
   }
   private prefabFor(kind:number):ObjectPrefab {return [this.cameraPrefab,this.lightPrefab,null,this.standingPrefab,this.seatedPrefab][kind];}
   private makeMarker(kind:number,label:string,groundY:number,saved?:MarkerRecord):SceneObject {

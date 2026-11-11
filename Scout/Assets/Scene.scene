@@ -2688,6 +2688,8 @@
         - !<reference> 65e67b45-77ef-487b-a649-41eb65f5a8b9
         - !<reference> d71b9e85-8d73-4c03-9377-adb736a63c8a
         - !<reference> 2a55a186-ddb9-4d0a-a659-5d34daec5d5e
+      worldMesh: !<reference.RenderMesh> 0fbb4118-6852-46b3-bf96-7d3a7911ec7b
+      occluderMaterial: !<reference.Material> 01d2ed01-c484-4bfa-b407-515a3221b657
       cinemaCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       gimbalPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       lensPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000

@@ -46,6 +46,7 @@
     markerMaterial: false
     markers: false
     maxMarkers: false
+    occluderMaterial: false
     palette: false
     photoCameraPrefab: false
     placementDistance: false
@@ -54,6 +55,7 @@
     sfxVolume: false
     standingPrefab: false
     workbenchPrefab: false
+    worldMesh: false
   ScriptTypesHidden:
     {}
   ReadMe: !<reference> 00000000-0000-0000-0000-000000000000
@@ -86,6 +88,8 @@
         []
       lightRig: !<reference.ObjectPrefab[]>
         []
+      worldMesh: !<reference.RenderMesh> 00000000-0000-0000-0000-000000000000
+      occluderMaterial: !<reference.Material> 00000000-0000-0000-0000-000000000000
       cinemaCameraPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       gimbalPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
       lensPrefab: !<reference.ObjectPrefab> 00000000-0000-0000-0000-000000000000
@@ -116,6 +120,8 @@
     - '// @input Asset.ObjectPrefab[] classicRig {"hint":"Camera tripod parts: legs, column, head"}'
     - '// @input Asset.ObjectPrefab[] cameraBodies {"hint":"Camera bodies: cinema, photo"}'
     - '// @input Asset.ObjectPrefab[] lightRig {"hint":"Light stand parts: base, pole, upper pole, softbox head"}'
+    - "// @input Asset.RenderMesh worldMesh {\"hint\":\"World Mesh: the real room's reconstructed surfaces, for occlusion\"}"
+    - "// @input Asset.Material occluderMaterial {\"hint\":\"Occluder material: writes depth only, so real objects hide what's behind them\"}"
     - // @input Asset.ObjectPrefab cinemaCameraPrefab
     - // @input Asset.ObjectPrefab gimbalPrefab
     - // @input Asset.ObjectPrefab lensPrefab

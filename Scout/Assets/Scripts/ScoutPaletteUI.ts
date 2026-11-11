@@ -17,6 +17,7 @@ const ACTOR_ICONS:Texture[]=[requireAsset("../Icons/dummy_face.png") as Texture,
 const HAND_ICON=requireAsset("../Icons/pan_tool.png") as Texture;
 const RESET_FLOOR_ICON=requireAsset("../Icons/restart_alt.png") as Texture;
 const FLOOR_RESET_ICON=requireAsset("../Icons/reset_floor.png") as Texture;
+const OCCLUSION_ICON=requireAsset("../Icons/visibility.png") as Texture;
 const LAYOUTS_ICON=requireAsset("../Icons/bookmarks.png") as Texture;
 const MOODBOARD_ICON=requireAsset("../Icons/photo_library.png") as Texture;
 const MIC_ICON=requireAsset("../Icons/mic.png") as Texture;
@@ -118,6 +119,10 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   onUndo = new Event<void>();
   onClear = new Event<void>();
   onResetFloor = new Event<void>();
+  onToggleOcclusion = new Event<void>();
+  private occlusionLabel:ElementContent=null;
+  /** Shows whether occlusion is on. */
+  setOcclusion(on:boolean):void {if(this.occlusionLabel)this.occlusionLabel.text=on?"Occlusion: On":"Occlusion: Off";}
   onSaveLayout = new Event<void>();
   onLoadLayout = new Event<string>();
   onRenameLayout = new Event<string>();
@@ -198,7 +203,9 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     this.button(actionRow,"Clear All",20.5,4.5,ICONS[4],()=>this.onClear.invoke());
     const floor=this.child(col,"Floor",42,4.5);
     const floorRow=this.flex(floor,FlexDirection.Row,42,4.5,1,0);
-    this.button(floorRow,"Reset Floor",42,4.5,RESET_FLOOR_ICON,()=>this.onResetFloor.invoke());
+    this.button(floorRow,"Reset Floor",20.5,4.5,RESET_FLOOR_ICON,()=>this.onResetFloor.invoke());
+    // Occlusion: props hide behind real furniture. On by default; ScoutMain owns the state.
+    this.occlusionLabel=this.button(floorRow,"Occlusion: Off",20.5,4.5,OCCLUSION_ICON,()=>this.onToggleOcclusion.invoke());
     const pages=this.child(col,"Pages",42,4.5);
     const pagesRow=this.flex(pages,FlexDirection.Row,42,4.5,1,0);
     this.button(pagesRow,"Saved Layouts",20.5,4.5,LAYOUTS_ICON,()=>this.showView("layouts"));
