@@ -325,6 +325,12 @@ export class ScoutWorkbench {
     return host;
   }
   /** Shrinks the whole bench away, then removes it. */
+  /** Clears the bench away without a choice (the floor is being reset); show() builds it again. */
+  dismiss():void {
+    if(!this.root||isNull(this.root)||this.chosen)return;
+    this.chosen=true;
+    this.hide();
+  }
   private hide():void {
     const root=this.root,t=root.getTransform(),from=t.getLocalScale();
     animate({duration:HIDE_SECONDS,easing:"ease-in-quad",ended:()=>{if(!isNull(root))root.destroy();},update:k=>{

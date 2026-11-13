@@ -12,6 +12,7 @@ const BODY_ICONS:{[k in BodyKind]:Texture}={
   photo:requireAsset("../Icons/photo_camera.png") as Texture,
 };
 const HEIGHT_ICON=requireAsset("../Icons/height.png") as Texture;
+const TILT_ICON=requireAsset("../Icons/tilt.png") as Texture;
 
 /** The tripod is the original ShotScout camera's, cut into legs / centre column / pan head
  * (Assets/GeneratedMeshes/CameraRig); either body sits on the head. All in cm, column axis at the
@@ -168,12 +169,20 @@ export class LightRig implements TiltRig {
   }
 }
 
-const GREEN:[number,number,number,number]=[.15,1,.3,1];
-const WHEEL_TUBE=0.9,WHEEL_ARCS=12;
+// Pale see-through glass, like the height slider's track (green was distracting).
+const RING_GLASS:[number,number,number,number]=[1,1,1,0.35];
+const WHEEL_TUBE=1.2,WHEEL_ARCS=12;
+// Hover glow: a soft purple ring a little thicker than the glass one; it lingers briefly after the cursor
+// leaves so edges don't flicker. Shared with the gizmo's turn ring.
+export const RING_GLOW:[number,number,number,number]=[0.66,0.5,1,0.55];
+export const RING_GLOW_TUBE=1.9,RING_GLOW_LINGER=0.2;
+// Purple hub in the middle of the wheel with the rotate icon, like the height slider's knob. It faces out
+// from the prop (the wheel sits on its left, -Z in the tilting frame) and turns the wheel too when dragged.
+const HUB_FRACTION=0.8,HUB_ICON=0.62,HUB_HOVER_SCALE=1.2;
 // Below this |view . axis| the wheel is seen edge-on, and dragging along the rim stands in for turning it.
 const EDGE_ON=0.3;
 
-/** A small green wheel on the camera's left side, on the tilt axis. Turning it turns the camera with it:
+/** A small glass wheel on the camera's left side, on the tilt axis. Turning it turns the camera with it:
  * spin it forward (top toward the lens) to tilt down, backward to tilt up. ScoutMain shows it only while
  * the camera is in edit mode. */
 export class TiltWheel {
@@ -186,27 +195,36 @@ export class TiltWheel {
     this.root.enabled=false;
   }
   get dragging():boolean {return !!this.drag;}
+  private glow:SceneObject=null;
+  private hoverAt=-1;
+  /** Called every frame while the wheel shows: the glow follows hover (with a short grace so it doesn't
+   * flicker at the edge) and stays on while the wheel is being turned. */
+  updateGlow():void {
+    if(!this.glow||isNull(this.glow))return;
+    const on=getTime()-this.hoverAt<RING_GLOW_LINGER||!!this.drag;
+    if(this.glow.enabled!==on)this.glow.enabled=on;
+  }
   /** Rebuilds the ring for the rig's current body (sizes differ). */
   rebuild(material:Material):void {
     for(let i=this.root.getChildrenCount()-1;i>=0;i--)this.root.getChild(i).destroy();
     const {center,radius}=this.rig.wheel;
     this.root.getTransform().setLocalPosition(center);
-    const ring=child(this.root,"Ring",vec3.zero());
-    const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
-    b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
-    const indices:number[]=[];
-    for(let j=0;j<=48;j++)for(let k=0;k<=8;k++){
-      const a=j*Math.PI/24,t=k*Math.PI/4;
-      const radial=new vec3(Math.cos(a),Math.sin(a),0);
-      const n=radial.uniformScale(Math.cos(t)).add(vec3.forward().uniformScale(Math.sin(t)));
-      const p=radial.uniformScale(radius).add(n.uniformScale(WHEEL_TUBE));
-      b.appendVerticesInterleaved([p.x,p.y,p.z,n.x,n.y,n.z,...GREEN]);
-      if(j<48&&k<8){const x=j*9+k;indices.push(x,x+9,x+1,x+1,x+9,x+10);}
-    }
-    b.appendIndices(indices);
-    const visual=ring.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-    visual.mesh=b.getMesh();visual.mainMaterial=material;b.updateMesh();
-    // Arc hit boxes leave the middle empty, so the camera behind stays grabbable.
+    ringMesh(child(this.root,"Ring",vec3.zero()),radius,WHEEL_TUBE,RING_GLASS,material);
+    // Soft purple glow around the ring while it's hovered (it's a thin target), off otherwise.
+    this.glow=child(this.root,"Ring glow",vec3.zero());
+    ringMesh(this.glow,radius,WHEEL_TUBE*RING_GLOW_TUBE,RING_GLOW,material);
+    this.glow.enabled=false;this.hoverAt=-1;
+    const hubSize=radius*HUB_FRACTION;
+    const hub=child(this.root,"Tilt hub",vec3.zero());
+    hub.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.up()));
+    const face=child(hub,"Face",vec3.zero());
+    panel(face,hubSize,hubSize,PURPLE,hubSize/2);
+    image(child(face,"Icon",new vec3(0,0,0.3)),TILT_ICON,hubSize*HUB_ICON,hubSize*HUB_ICON,BODY_INK);
+    const hubCol=hub.createComponent("Physics.ColliderComponent") as ColliderComponent;
+    const hubBox=Shape.createBoxShape();hubBox.size=new vec3(hubSize,hubSize,3);hubCol.shape=hubBox;
+    const hubInput=this.bind(hub);
+    addHoverFeedback(hubInput,face,undefined,HUB_HOVER_SCALE,true);
+    // Arc hit boxes around the ring; the hub covers the middle.
     for(let i=0;i<WHEEL_ARCS;i++){
       const a=i*2*Math.PI/WHEEL_ARCS;
       const hit=child(this.root,"Tilt arc "+i,new vec3(Math.cos(a)*radius,Math.sin(a)*radius,0));
@@ -222,9 +240,11 @@ export class TiltWheel {
     if(d.direct)return interactor.startPoint;
     return planeHit(interactor,d.center,d.edge?d.view:d.axis);
   }
-  private bind(object:SceneObject):void {
+  private bind(object:SceneObject):Interactable {
     const input=object.createComponent(Interactable.getTypeName()) as Interactable;
     input.targetingMode=3;input.enableInstantDrag=true;
+    input.onHoverEnter.add(()=>{this.hoverAt=getTime();});
+    input.onHoverUpdate.add(()=>{this.hoverAt=getTime();});
     input.onTriggerStart.add(e=>{
       e.stopPropagation();this.touched();
       if(this.drag)return;
@@ -258,7 +278,26 @@ export class TiltWheel {
     });
     const end=()=>{if(this.drag){this.drag=null;this.touched();}};
     input.onTriggerEnd.add(end);input.onTriggerEndOutside.add(end);input.onTriggerCanceled.add(end);
+    return input;
   }
+}
+
+/** A torus in the XY plane (axis +Z) as a vertex-coloured mesh on `so`. */
+function ringMesh(so:SceneObject,radius:number,tube:number,color:[number,number,number,number],material:Material):void {
+  const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
+  b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
+  const indices:number[]=[];
+  for(let j=0;j<=48;j++)for(let k=0;k<=8;k++){
+    const a=j*Math.PI/24,t=k*Math.PI/4;
+    const radial=new vec3(Math.cos(a),Math.sin(a),0);
+    const n=radial.uniformScale(Math.cos(t)).add(vec3.forward().uniformScale(Math.sin(t)));
+    const p=radial.uniformScale(radius).add(n.uniformScale(tube));
+    b.appendVerticesInterleaved([p.x,p.y,p.z,n.x,n.y,n.z,...color]);
+    if(j<48&&k<8){const x=j*9+k;indices.push(x,x+9,x+1,x+1,x+9,x+10);}
+  }
+  b.appendIndices(indices);
+  const visual=so.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+  visual.mesh=b.getMesh();visual.mainMaterial=material;b.updateMesh();
 }
 
 function planeHit(interactor:Interactor,origin:vec3,normal:vec3):vec3 {

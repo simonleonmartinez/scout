@@ -73,6 +73,9 @@ const WHITE=requireAsset("../Textures/white.png") as Texture;
 const PANEL_RADIUS=2.6,BUTTON_RADIUS=1.4;
 const CAP_WIDTH=6,CAP_HEIGHT=14;
 const TOOLBAR_ICON=6,TOOLBAR_GAP=1.2,TOOLBAR_COUNT=5;
+// Selected tool: a purple ring this much wider than the button on each side (cm).
+const SELECTED_RING=0.6;
+const SELECTED_TINT=new vec4(0x8a/255,0x6c/255,0xf0/255,1);
 const COLLAPSED_SIZE=new vec2(TOOLBAR_ICON+3,TOOLBAR_COUNT*TOOLBAR_ICON+(TOOLBAR_COUNT-1)*TOOLBAR_GAP+3);
 // Reset Floor floats on its own above the tool bar, in a quieter grey, so it doesn't read as a placeable asset.
 const FLOOR_BUTTON=7.5,FLOOR_GAP=3.5;
@@ -141,6 +144,8 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   private back:BackPlate;
   private col:SceneObject;
   private collapsedBar:SceneObject;
+  private selectedRing:SceneObject=null;
+  private toolYs:number[]=[];
   private cap:SceneObject;
   private capIcon:Image;
   private expandedSize:vec2;
@@ -228,6 +233,22 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     this.setState(this.selected,this.count);
   }
   /** Manually toggled by the cap. */
+  /** Bench step (before a shoot type is picked): only the floating Reset Floor button shows — the tools
+   * can't be used yet, but a bench standing on a wrong floor must still be fixable. */
+  private floorOnly=false;
+  setFloorOnly(on:boolean):void {
+    if(on===this.floorOnly)return;
+    this.floorOnly=on;
+    if(on)this.setCollapsed(true);
+    for(let i=0;i<this.collapsedBar.getChildrenCount();i++){
+      const c=this.collapsedBar.getChild(i);
+      if(c.name.indexOf("Tool")===0||c.name==="Selected")c.enabled=!on;
+    }
+    if(this.cap)this.cap.enabled=!on;
+    // The bar's background: its rounded rectangle redraws itself, so shrink it away rather than hide it.
+    if(this.back)this.back.size=on?new vec2(0.01,0.01):(this.collapsed?COLLAPSED_SIZE:this.expandedSize);
+    if(this.back?.interactable)this.back.interactable.enabled=!on;
+  }
   setCollapsed(collapsed:boolean):void { this.manualCollapsed=collapsed; this.applyCollapsed(); }
   /** Driven by ScoutMain based on head movement speed; overrides the manual state while moving fast. */
   setAutoCollapsed(forced:boolean):void { this.forcedCollapsed=forced; this.applyCollapsed(); }
@@ -332,12 +353,22 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       [ICONS[0],()=>this.onSelect.invoke(0)],
       [ICONS[1],()=>this.onSelect.invoke(1)],
       [ICONS[2],()=>this.onSelect.invoke(2)],
-      [ACTOR_ICONS[0],()=>{this.subjectPose=this.subjectPose===3?4:3;this.onSelect.invoke(this.subjectPose);}],
+      // Tapping Subject again while it's selected flips Standing/Seated; coming back to it keeps the last pose.
+      [ACTOR_ICONS[0],()=>{if(this.selected===3||this.selected===4)this.subjectPose=this.subjectPose===3?4:3;this.onSelect.invoke(this.subjectPose);}],
       [HAND_ICON,()=>this.onSelect.invoke(HAND_KIND)],
     ];
     const totalH=TOOLBAR_COUNT*TOOLBAR_ICON+(TOOLBAR_COUNT-1)*TOOLBAR_GAP;
+    // A purple ring behind the selected tool's button shows what a pinch on the floor will do.
+    this.toolYs=tools.map((_,i)=>totalH/2-TOOLBAR_ICON/2-i*(TOOLBAR_ICON+TOOLBAR_GAP));
+    this.selectedRing=this.obj(bar,"Selected",new vec3(0,this.toolYs[0],-0.01));
+    const ring=this.selectedRing.createComponent(BackPlate.getTypeName()) as BackPlate;
+    ring.style="simple";ring.size=new vec2(TOOLBAR_ICON+SELECTED_RING*2,TOOLBAR_ICON+SELECTED_RING*2);
+    ring.onInitialized.add(()=>{
+      this.style(ring,SELECTED_TINT,TOOLBAR_ICON/2+SELECTED_RING);
+      ring.interactable.enabled=false;ring.interactionPlane.enabled=false;
+    });
     tools.forEach(([icon,action],i)=>{
-      const y=totalH/2-TOOLBAR_ICON/2-i*(TOOLBAR_ICON+TOOLBAR_GAP);
+      const y=this.toolYs[i];
       this.iconBadge(this.obj(bar,"Tool"+i,new vec3(0,y,0)),icon,TEXT_TINT,TOOLBAR_ICON,0,action);
     });
     this.buildFloorButton(bar,COLLAPSED_SIZE.y/2+FLOOR_GAP+FLOOR_BUTTON/2);
@@ -393,6 +424,9 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   }
   setState(selected:number,count:number): void {
     this.selected=selected; this.count=count;
+    // Bar slots: Camera, Light, Note, Subject (standing or seated), Hand.
+    const slot=selected===HAND_KIND?4:selected>=3?3:selected;
+    if(this.selectedRing&&this.toolYs[slot]!==undefined)this.selectedRing.getTransform().setLocalPosition(new vec3(0,this.toolYs[slot],-0.01));
     const shoot=this.shootType==="photo"?"Photo shoot  ·  ":this.shootType==="video"?"Video shoot  ·  ":"";
     if (this.status) this.status.text=shoot+TOOL_NAMES[selected]+" ready  ·  "+count+" placed";
     this.selectionLabels.forEach((label,i)=> {label.text=(i===selected?"• ":"")+TOOL_NAMES[i]});

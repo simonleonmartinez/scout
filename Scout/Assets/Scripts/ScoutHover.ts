@@ -7,6 +7,8 @@ import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
 export const HOVER_GLOW=new vec4(0.66,0.5,1,1);
 const HOVER_SCALE=1.08;
 const HOVER_SECONDS=0.12;
+// How long the cursor must stay off before the hover lets go (s) — keeps edges from flickering.
+const HOVER_LEAVE_DELAY=0.2;
 // How far a button's own color leans toward HOVER_GLOW at full hover — "very slight", not a recolor.
 const HOVER_GLOW_MIX=0.4;
 
@@ -32,11 +34,24 @@ export function addHoverFeedback(interactable:Interactable,target:SceneObject,se
       if(setGlow)setGlow(level);
     }});
   };
+  // Right on an edge the hand's natural jitter flips hover on and off every few frames, which restarted the
+  // grow/shrink each time and made things bounce. Leaving only counts once the cursor has stayed off for
+  // HOVER_LEAVE_DELAY; coming back within it cancels the leave, so the edge holds steady.
+  let leaving:CancelFunction=null;
+  const want=(on:boolean)=>{
+    if(on){
+      if(leaving){leaving();leaving=null;}
+      go(1);
+    }else{
+      if(leaving||goal===0)return;
+      leaving=animate({duration:HOVER_LEAVE_DELAY,update:()=>{},ended:()=>{leaving=null;go(0);}});
+    }
+  };
   const own=(e:InteractorEvent)=>!ownOnly||e.target===interactable;
-  interactable.onHoverEnter.add(e=>go(own(e)?1:0));
+  interactable.onHoverEnter.add(e=>want(own(e)));
   // The cursor can slide from the interactable onto a child (or back) without a fresh enter/exit.
-  if(ownOnly)interactable.onHoverUpdate.add(e=>go(own(e)?1:0));
-  interactable.onHoverExit.add(()=>go(0));
+  if(ownOnly)interactable.onHoverUpdate.add(e=>want(own(e)));
+  interactable.onHoverExit.add(()=>want(false));
 }
 
 /** addHoverFeedback for a BackPlate button: grows it and tints its background a little toward purple.

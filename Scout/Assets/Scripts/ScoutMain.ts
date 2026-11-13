@@ -138,8 +138,14 @@ const MODEL_HEIGHTS=[145,165,30,170,125];
 const SLIDER_OUT=14,SLIDER_SIDE=30,SLIDER_Y=28;
 // Lights' sliders sit lower, beside the pole, clear of the wide softbox above.
 const LIGHT_SLIDER_Y=-6;
+// When a moved asset settles, the downward ray starts this far above its feet (cm).
+const SETTLE_RAY_ABOVE=20;
 // Occlusion: the occluder renders first; its on/off setting is remembered per device.
 const OCCLUDER_RENDER_ORDER=-100,OCCLUSION_KEY="scout.occlusion";
+// The scanned floor is bumpy (rugs, scan noise), so at its true height it pokes through anything resting on
+// the floor (tripod feet, the footprint outline). Sinking the occluder this far (cm) keeps the floor from
+// hiding what sits on it, while furniture still hides what's behind it.
+const OCCLUDER_SINK=4;
 // Key light rig: local offset from the model's pivot to the softbox opening, in the model's own raw
 // mesh units (meters) — a child's local position is carried through the SAME transform that maps the
 // mesh's own vertices to world space, so using the mesh's own coordinates directly (not re-scaled)
@@ -296,8 +302,11 @@ export class ScoutMain extends BaseScriptComponent {
     if(!this.palette||!this.markers||!this.placementPreview||!this.camera||!this.markerMaterial){console.error("Scout: required scene references are missing");return}
     this.palette.setBadgeMaterial(this.markerMaterial);
     this.selectAudio=this.audio(SELECT);this.placeAudio=this.audio(PLACE);
-    this.palette.onSelect.add(kind=>{this.pinningPoster=false;this.selected=kind;this.lastAction=getTime();this.selectAudio.play(1);this.rebuildPreview();this.refresh();this.applyDragMode()});
+    this.palette.onSelect.add(kind=>{this.selectTool(kind);this.selectAudio.play(1);});
     this.gizmo=new ScoutTransformGizmo(this.markerMaterial,this.camera,()=>{this.lastAction=getTime();});
+    // Arrow moves drop props onto the surface under them; actors may have been raised with the vertical
+    // arrow on purpose, so they keep their height.
+    this.gizmo.onMoved=root=>{const k=this.kinds[this.placed.indexOf(root)];if(k!==3&&k!==4)this.settleOnSurface(root);};
     this.hitSession=WorldQuery.createHitTestSessionWithOptions(HitTestSessionOptions.create());
     this.hitSession.start();
     this.palette.onUndo.add(()=>this.undo());
@@ -470,7 +479,11 @@ export class ScoutMain extends BaseScriptComponent {
     this.toolkitCard.update();
     // The menu also steps aside while the room outline is drawn or lined up: it would sit in front of the
     // outline panel and its buttons.
-    const hideMenu=settingUp||this.roomOutline.active||this.toolkitCard.active;
+    // While the bench waits for a shoot type, only the floating Reset Floor button shows, so a bench
+    // standing on a wrongly detected floor can be fixed straight away.
+    const benchStep=this.floorSetup.done&&this.workbench.active;
+    this.palette.setFloorOnly(benchStep);
+    const hideMenu=(settingUp&&!benchStep)||this.roomOutline.active||this.toolkitCard.active;
     if(this.paletteShown===hideMenu){this.paletteShown=!hideMenu;this.palette.sceneObject.enabled=!hideMenu;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
@@ -561,6 +574,8 @@ export class ScoutMain extends BaseScriptComponent {
     // The old floor stays locked until the new one is confirmed (or setup is skipped, which keeps it),
     // so markers standing on it can be recognised and moved across in confirmFloor.
     this.gizmo.select(null);this.editing=null;
+    // A bench still waiting for a shoot type goes too; it's put back on the new floor once that's confirmed.
+    if(this.workbench.active){this.workbench.dismiss();this.workbenchShown=false;}
     this.floorSetup.restart();
     this.selectAudio.play(1);
   }
@@ -612,15 +627,28 @@ export class ScoutMain extends BaseScriptComponent {
    * hanging midair. With no hit (surface out of view) it's left where it is — the floor clamp still holds. */
   private settleOnSurface(root:SceneObject):void {
     if(isNull(root))return;
-    const p=root.getTransform().getWorldPosition();
-    this.groundHitTest(new vec3(p.x,this.bottomOf(root),p.z),result=>{
-      if(isNull(root)||!this.isFlat(result))return;
-      const idx=this.placed.indexOf(root);
-      if(idx<0)return;
-      this.noteSurface(result.position.y);
-      this.groundY[idx]=result.position.y;
-      this.liftOnto(root,result.position.y);
+    const idx=this.placed.indexOf(root);
+    if(idx<0)return;
+    const kind=this.kinds[idx];
+    const p=root.getTransform().getWorldPosition(),feet=this.bottomOf(root);
+    // Cast from just above the feet, so a table or shelf overhead isn't taken for the surface below.
+    const top=new vec3(p.x,feet+SETTLE_RAY_ABOVE,p.z),bottom=new vec3(p.x,feet-400,p.z);
+    const land=(y:number)=>{
+      if(isNull(root)||this.placed.indexOf(root)<0)return;
+      this.groundY[this.placed.indexOf(root)]=y;
+      this.liftOnto(root,y);
       if(this.editing===root)this.gizmo.update();
+    };
+    const fallback=()=>{
+      // Nothing flat below (moved off the edge of a chair, say): stand on the floor rather than float.
+      // (Actors are left alone: they may be held up on purpose.)
+      if(this.floorY!==null&&!(kind===3||kind===4)&&feet>this.floorY+1)land(this.floorY);
+    };
+    if(!this.hitSession){fallback();return}
+    this.hitSession.hitTest(top,bottom,result=>{
+      if(isNull(root))return;
+      if(this.isFlat(result)){this.noteSurface(result.position.y);land(result.position.y);}
+      else fallback();
     });
   }
   /** Resolves a queued pinch: places on the first flat hit, or on the known floor once the search window
@@ -840,7 +868,14 @@ export class ScoutMain extends BaseScriptComponent {
     this.pending={kind:this.selected,ray:this.rayFor(interactor),aim:this.positionFor(interactor),started:getTime()};
   }
   /** `position` is the point on the real surface; the marker's lowest point is stood on it. */
+  /** Picks the tool used for the next pinch on the floor (an asset kind, or HAND_KIND for none). */
+  private selectTool(kind:number):void {
+    this.pinningPoster=false;this.selected=kind;this.lastAction=getTime();
+    this.rebuildPreview();this.refresh();this.applyDragMode();
+  }
   private spawnMarker(kind:number,position:vec3):void {
+    // Placing something new means the user has moved on: close edit mode on whatever was being adjusted.
+    this.closeEdit();
     const label=TOOL_NAMES[kind]+" "+String(++this.sequence).padStart(2,"0");
     const root=this.makeMarker(kind,label,position.y);
     root.getTransform().setWorldPosition(position);
@@ -863,6 +898,9 @@ export class ScoutMain extends BaseScriptComponent {
     if(kind===0)this.tips.show("capture");
     if(kind===2)this.tips.show("note");
     if(this.placed.length>=3)this.tips.show("save");
+    // Back to the Hand: after placing something the user usually wants to look at or adjust it, not
+    // drop another of the same right away. Picking a tool again places another.
+    this.selectTool(HAND_KIND);
   }
   /** Angles the key light down toward eye level for a typically-shorter seated/standing subject.
    * Must run after root's final camera-facing rotation is set (spawnMarker/restore) — computing this
@@ -935,7 +973,12 @@ export class ScoutMain extends BaseScriptComponent {
   /** One shared material for the tilt wheels (vertex-coloured, like the gizmo's handles). */
   private tiltWheelMaterial:Material=null;
   private wheelMaterial():Material {
-    if(!this.tiltWheelMaterial)this.tiltWheelMaterial=this.markerMaterial.clone();
+    if(!this.tiltWheelMaterial){
+      this.tiltWheelMaterial=this.markerMaterial.clone();
+      // The ring is translucent glass: blend it over what's behind, without hiding things in the depth buffer.
+      this.tiltWheelMaterial.mainPass.blendMode=BlendMode.Normal;
+      this.tiltWheelMaterial.mainPass.depthWrite=false;
+    }
     return this.tiltWheelMaterial;
   }
   /** Each camera's height slider and tilt wheel show only while it's in edit mode (or mid-drag), so
@@ -949,6 +992,7 @@ export class ScoutMain extends BaseScriptComponent {
       if(show&&h.facingPivot&&!isNull(h.facingPivot))h.pivot.getTransform().setLocalRotation(h.facingPivot.getTransform().getLocalRotation());
       const wheel=editing||h.wheel.dragging;
       if(h.wheel.root.enabled!==wheel)h.wheel.root.enabled=wheel;
+      if(wheel)h.wheel.updateGlow();
     }
   }
   /** Occlusion: the World Mesh (the room as Specs reconstructs it) drawn with a depth-only occluder, so
@@ -962,6 +1006,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.occluder=global.scene.createSceneObject("World occluder");
     const visual=this.occluder.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
     visual.mesh=this.worldMesh;visual.mainMaterial=this.occluderMaterial;
+    this.occluder.getTransform().setWorldPosition(new vec3(0,-OCCLUDER_SINK,0));
     // Drawn before everything else, so its depth is in place when the props render.
     visual.setRenderOrder(OCCLUDER_RENDER_ORDER);
     this.occluderProvider=this.worldMesh.control as WorldRenderObjectProvider;
@@ -1168,6 +1213,11 @@ export class ScoutMain extends BaseScriptComponent {
     b.updateMesh();
   }
   /** Toggles the constrained-axis handles for one specific asset; vertical movement only applies to standing/seated actors. */
+  /** Closes edit mode (handles, height slider and tilt wheel) if it's open on anything. */
+  private closeEdit():void {
+    if(!this.editing)return;
+    this.gizmo.select(null);this.editing=null;
+  }
   private editMarker(root:SceneObject):void {
     this.lastAction=getTime();
     const idx=this.placed.indexOf(root);
@@ -1228,6 +1278,7 @@ export class ScoutMain extends BaseScriptComponent {
     else this.showHint("Point at a wall to pin the poster");
   }
   private pinPoster():void {
+    this.closeEdit();
     if(!this.wallHit||getTime()-this.wallHit.time>=PREVIEW_HIT_FRESH){this.showHint("Point at a wall to pin the poster");return}
     this.lastAction=getTime();
     const poster=this.makePoster();

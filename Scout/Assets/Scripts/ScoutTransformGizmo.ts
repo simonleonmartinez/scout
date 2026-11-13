@@ -1,9 +1,13 @@
 import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {Interactor,TargetingMode} from "SpectaclesInteractionKit.lspkg/Core/Interactor/Interactor";
 import {buildLathe} from "./ScoutMarkerMesh";
+import {RING_GLOW,RING_GLOW_TUBE,RING_GLOW_LINGER} from "./ScoutCameraRig";
 
 const AXES=[vec3.right(),vec3.up(),vec3.forward()];
 const COLORS:[number,number,number,number][]=[[1,.15,.15,1],[.15,1,.3,1],[.2,.5,1,1]];
+// The turn ring is pale see-through glass (like the height slider and tilt wheel) rather than bright green.
+const RING_GLASS:[number,number,number,number]=[1,1,1,0.35];
+const RING_TUBE=1.2;
 const RADIUS=55;
 /** One world-axis gizmo shared by all placements. SIK supplies mouse and hand input. */
 export class ScoutTransformGizmo {
@@ -14,12 +18,18 @@ export class ScoutTransformGizmo {
   private target:SceneObject=null;
   private mode="Show handles";
   private allowVertical=false;
+  private ringGlow:SceneObject=null;
+  /** Called after a sideways move with the move arrows ends. */
+  onMoved:(target:SceneObject)=>void=null;
+  private ringHoverAt=-1;
   private floorY=-Infinity;
   private drag:{interactor:Interactor;axis:vec3;normal:vec3;origin:vec3;position:vec3;rotation:quat;previous:vec3;angle:number;direct:boolean;rotate:boolean;edge:boolean;tangent:vec3}=null;
   constructor(private material:Material,private camera:Camera,private touched:()=>void){
     this.material=material.clone();
     this.material.mainPass.depthTest=false;
     this.material.mainPass.depthWrite=false;
+    // Blended, so the glass ring is see-through; the arrows are fully opaque and look the same.
+    this.material.mainPass.blendMode=BlendMode.Normal;
     this.root=this.object("Transform handles");
     this.move=this.object("Move handles",this.root);
     this.moveVertical=this.object("Move vertical handle",this.root);
@@ -39,7 +49,11 @@ export class ScoutTransformGizmo {
       if(i!==1)return;
       const ring=this.object("Rotate "+"XYZ"[i],this.rotate);
       const u=AXES[(i+1)%3],v=axis.cross(u);
-      this.mesh(ring,b=>this.torus(b,u,v,COLORS[i]));
+      this.mesh(ring,b=>this.torus(b,u,v,RING_GLASS,RING_TUBE));
+      // Soft purple glow while the ring is hovered (it's a thin target).
+      this.ringGlow=this.object("Rotate glow",ring);
+      this.mesh(this.ringGlow,b=>this.torus(b,u,v,RING_GLOW,RING_TUBE*RING_GLOW_TUBE));
+      this.ringGlow.enabled=false;
       // Separate arc hit boxes leave the center empty, so equipment remains selectable.
       for(let j=0;j<24;j++){
         const angle=j*Math.PI/12;
@@ -66,10 +80,18 @@ export class ScoutTransformGizmo {
     this.root.enabled=!!valid&&this.mode!=="Hide handles";
     this.move.enabled=true;this.rotate.enabled=true;this.moveVertical.enabled=this.allowVertical;
     if(valid)this.root.getTransform().setWorldPosition(this.target.getTransform().getWorldPosition());
+    if(this.ringGlow){
+      const on=getTime()-this.ringHoverAt<RING_GLOW_LINGER||!!this.drag?.rotate;
+      if(this.ringGlow.enabled!==on)this.ringGlow.enabled=on;
+    }
   }
   private bind(object:SceneObject,axis:vec3,rotate:boolean):void {
     const input=object.createComponent(Interactable.getTypeName()) as Interactable;
     input.targetingMode=3;input.enableInstantDrag=true;
+    if(rotate){
+      input.onHoverEnter.add(()=>{this.ringHoverAt=getTime();});
+      input.onHoverUpdate.add(()=>{this.ringHoverAt=getTime();});
+    }
     input.onTriggerStart.add(e=>{
       e.stopPropagation();this.touched();
       if(!this.target||isNull(this.target)||this.drag)return;
@@ -106,7 +128,12 @@ export class ScoutTransformGizmo {
       }
       d.previous=point;this.update();
     });
-    const end=()=>{this.drag=null;this.touched();};
+    const end=()=>{
+      const d=this.drag;
+      this.drag=null;this.touched();
+      // A sideways move ends with the asset dropped onto whatever surface is now under it (ScoutMain).
+      if(d&&!d.rotate&&Math.abs(d.axis.y)<0.9&&this.target&&!isNull(this.target)&&this.onMoved)this.onMoved(this.target);
+    };
     input.onTriggerEnd.add(end);input.onTriggerEndOutside.add(end);input.onTriggerCanceled.add(end);
   }
   private intersection(interactor:Interactor,origin:vec3,normal:vec3):vec3 {
@@ -127,13 +154,13 @@ export class ScoutTransformGizmo {
     const visual=object.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
     visual.mesh=b.getMesh();visual.mainMaterial=this.material;visual.setRenderOrder(100);b.updateMesh();
   }
-  private torus(b:MeshBuilder,u:vec3,v:vec3,color:number[]):void {
+  private torus(b:MeshBuilder,u:vec3,v:vec3,color:number[],tube:number):void {
     const axis=u.cross(v),indices:number[]=[];
     for(let j=0;j<=64;j++)for(let k=0;k<=8;k++){
       const a=j*Math.PI/32,t=k*Math.PI/4;
       const radial=u.uniformScale(Math.cos(a)).add(v.uniformScale(Math.sin(a)));
       const n=radial.uniformScale(Math.cos(t)).add(axis.uniformScale(Math.sin(t)));
-      const p=radial.uniformScale(RADIUS).add(n.uniformScale(1.2));
+      const p=radial.uniformScale(RADIUS).add(n.uniformScale(tube));
       b.appendVerticesInterleaved([p.x,p.y,p.z,n.x,n.y,n.z,...color]);
       if(j<64&&k<8){const x=j*9+k;indices.push(x,x+9,x+1,x+1,x+9,x+10);}
     }
