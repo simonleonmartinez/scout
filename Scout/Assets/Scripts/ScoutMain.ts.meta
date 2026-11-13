@@ -121,7 +121,7 @@
     - // @input Asset.ObjectPrefab lightPrefab
     - // @input Asset.ObjectPrefab standingPrefab
     - // @input Asset.ObjectPrefab seatedPrefab
-    - '// @input Asset.ObjectPrefab[] dummyParts {"hint":"Posable dummy pieces (GeneratedMeshes/Dummy): pelvis, torso, head, upper arm L, forearm L, upper arm R, forearm R, thigh L, shin L, thigh R, shin R"}'
+    - '// @input Asset.ObjectPrefab[] dummyParts {"hint":"Posable dummy pieces (GeneratedMeshes/Dummy): pelvis, torso, head, upper arm L, forearm L, upper arm R, forearm R, thigh L, shin L, thigh R, shin R, hand L, hand R"}'
     - "// @input Asset.Material dummyMaterial {\"hint\":\"The standing dummy's own material, for the posable pieces\"}"
     - // @input Asset.ObjectPrefab workbenchPrefab
     - '// @input Asset.ObjectPrefab[] classicRig {"hint":"Camera tripod parts: legs, column, head"}'

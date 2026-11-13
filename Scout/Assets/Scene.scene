@@ -2687,6 +2687,8 @@
         - !<reference> 1db6bf57-3884-4547-af1d-33d6f702b6f1
         - !<reference> a92e2f14-f747-43a1-b13a-3086918fbb21
         - !<reference> 3f0294cc-e1f8-43f1-9b02-bebf1a2e59fe
+        - !<reference> f1de3bb4-57e7-4fa3-bfcd-9f3bcb2a4b1c
+        - !<reference> 7be5fad0-830e-40c6-a52e-9456167c0927
       dummyMaterial: !<reference.Material> c5bfe75a-9ef9-4c5d-b761-0cab5b0d7a03
       workbenchPrefab: !<reference.ObjectPrefab> e146f070-abf6-4b90-8a49-1fad9d861877
       classicRig: !<reference.ObjectPrefab[]>

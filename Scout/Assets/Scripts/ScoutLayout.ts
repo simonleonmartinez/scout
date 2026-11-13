@@ -17,7 +17,7 @@ export function parseLayout(raw:string):ScoutLayout {
     if(l!==undefined&&(m.kind!==1||!l||!index(l.intensityIndex,20)||!index(l.kelvinIndex,11)))throw new Error('Invalid light settings');
     if(n!==undefined&&(m.kind!==2||!n||!index(n.step,4)||!index(n.shotNumber,10)||n.shotNumber<1||(n.shotType!==null&&!index(n.shotType,5))||(n.movementType!==null&&!index(n.movementType,5))))throw new Error('Invalid note settings');
     const p=m.pose;
-    if(p!==undefined&&((m.kind!==3&&m.kind!==4)||!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).length>11||!Object.values(p).every(q=>vector(q,4))))throw new Error('Invalid pose');
+    if(p!==undefined&&((m.kind!==3&&m.kind!==4)||!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).length>13||!Object.values(p).every(q=>vector(q,4))))throw new Error('Invalid pose');
     const norm=m.rotation.reduce((sum:number,x:number)=>sum+x*x,0);
     if(Math.abs(norm-1)>.02)throw new Error('Invalid orientation');
   }

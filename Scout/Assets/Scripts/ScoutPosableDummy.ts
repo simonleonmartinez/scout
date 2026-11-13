@@ -1,5 +1,6 @@
 import {Interactable,TargetingPriority} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {Interactor,TargetingMode} from "SpectaclesInteractionKit.lspkg/Core/Interactor/Interactor";
+import {KNEE_SLEEVES,SleeveData} from "./ScoutDummySleeves";
 
 /** A pose: each moved joint's local rotation as [w,x,y,z]. Joints left at rest are omitted. */
 export type DummyPose={[joint:string]:number[]};
@@ -11,18 +12,26 @@ export type DummyPose={[joint:string]:number[]};
  * imported meshes' own bounds always include the origin, so they can't be used); `ball` is the radii of the
  * dark joint ball that fills the gap when the joint bends, centred at `ballAt`. Each ball is the largest
  * that still fits inside the body at rest, so it only shows through the gap, never over the skin. */
-const JOINTS:{name:string;parent:string|null;pivot:vec3;limit:number;lo:vec3;hi:vec3;ball?:vec3;ballAt?:vec3}[]=[
+/** A joint that only bends one way about one axis (in its parent's frame), from `min` to `max` degrees. */
+type Hinge={axis:vec3;min:number;max:number};
+// Knees: the shin only folds back behind the thigh (positive about the dummy's left-right axis). They bend
+// through a `sleeve` of the original mesh that deforms with the bend (the kneecap stretches over it)
+// rather than two rigid pieces that would gape open at the front.
+const KNEE:Hinge={axis:new vec3(1,0,0),min:0,max:140};
+const JOINTS:{name:string;parent:string|null;pivot:vec3;limit:number;lo:vec3;hi:vec3;ball?:vec3;ballAt?:vec3;hinge?:Hinge;sleeve?:SleeveData}[]=[
   {name:"pelvis",parent:null,pivot:new vec3(0,0,0),limit:0,lo:new vec3(-2.3,13.5,-2),hi:new vec3(2.3,17,1.9)},
   {name:"torso",parent:"pelvis",pivot:new vec3(0,17,-0.1),limit:40,lo:new vec3(-2.7,17,-2.6),hi:new vec3(2.7,24.3,2.3),ball:new vec3(1.5,0.54,1.04),ballAt:new vec3(0,16.6,-0.1)},
   {name:"head",parent:"torso",pivot:new vec3(0,24.3,-0.55),limit:55,lo:new vec3(-2.4,24.3,-2.7),hi:new vec3(2.4,30,2.7),ball:new vec3(0.78,0.78,0.78),ballAt:new vec3(0,23.9,-0.45)},
   {name:"upperArmL",parent:"torso",pivot:new vec3(3.8,22.2,-0.5),limit:170,lo:new vec3(2.7,17.8,-1.9),hi:new vec3(4.7,23.4,0.7),ball:new vec3(0.63,0.63,0.63),ballAt:new vec3(3.5,22.4,-0.4)},
-  {name:"foreArmL",parent:"upperArmL",pivot:new vec3(4.1,17.8,-0.4),limit:145,lo:new vec3(3.5,10.4,-1.3),hi:new vec3(5.1,17.8,1.1),ball:new vec3(0.5,0.5,0.5),ballAt:new vec3(4.1,17.6,-0.6)},
+  {name:"foreArmL",parent:"upperArmL",pivot:new vec3(4.1,17.8,-0.4),limit:145,lo:new vec3(3.5,13.4,-1.3),hi:new vec3(5.1,17.8,0.7),ball:new vec3(0.5,0.5,0.5),ballAt:new vec3(4.1,17.6,-0.6)},
   {name:"upperArmR",parent:"torso",pivot:new vec3(-3.8,22.2,-0.5),limit:170,lo:new vec3(-4.7,17.8,-1.9),hi:new vec3(-2.7,23.2,0.7),ball:new vec3(0.63,0.63,0.63),ballAt:new vec3(-3.5,22.4,-0.4)},
-  {name:"foreArmR",parent:"upperArmR",pivot:new vec3(-4.1,17.8,-0.4),limit:145,lo:new vec3(-5.1,10.4,-1.3),hi:new vec3(-3.5,17.8,1.1),ball:new vec3(0.5,0.5,0.5),ballAt:new vec3(-4.1,17.6,-0.6)},
-  {name:"thighL",parent:"pelvis",pivot:new vec3(1.5,14.4,-0.1),limit:110,lo:new vec3(0.4,8,-1.8),hi:new vec3(3.2,15.2,1.5),ball:new vec3(1.07,1.07,1.07),ballAt:new vec3(1.3,14.6,-0.05)},
-  {name:"shinL",parent:"thighL",pivot:new vec3(1.8,8,-0.25),limit:140,lo:new vec3(0.8,0,-2.6),hi:new vec3(3.6,8,2.2),ball:new vec3(0.69,0.69,0.69),ballAt:new vec3(1.8,8.2,-0.45)},
-  {name:"thighR",parent:"pelvis",pivot:new vec3(-1.5,14.4,-0.1),limit:110,lo:new vec3(-3.2,8,-1.8),hi:new vec3(-0.4,15.2,1.5),ball:new vec3(1.07,1.07,1.07),ballAt:new vec3(-1.3,14.6,-0.05)},
-  {name:"shinR",parent:"thighR",pivot:new vec3(-1.8,8,-0.25),limit:140,lo:new vec3(-3.6,0,-2.6),hi:new vec3(-0.8,8,2.2),ball:new vec3(0.69,0.69,0.69),ballAt:new vec3(-1.8,8.2,-0.45)},
+  {name:"foreArmR",parent:"upperArmR",pivot:new vec3(-4.1,17.8,-0.4),limit:145,lo:new vec3(-5.1,13.4,-1.3),hi:new vec3(-3.5,17.8,0.7),ball:new vec3(0.5,0.5,0.5),ballAt:new vec3(-4.1,17.6,-0.6)},
+  {name:"thighL",parent:"pelvis",pivot:new vec3(1.5,14.4,-0.1),limit:110,lo:new vec3(0.4,8.8,-1.8),hi:new vec3(3.2,15.2,1.5),ball:new vec3(1.07,1.07,1.07),ballAt:new vec3(1.3,14.6,-0.05)},
+  {name:"shinL",parent:"thighL",pivot:new vec3(1.8,8,-0.25),limit:140,lo:new vec3(0.8,0,-2.6),hi:new vec3(3.6,7.8,2.2),hinge:KNEE,sleeve:KNEE_SLEEVES.L},
+  {name:"thighR",parent:"pelvis",pivot:new vec3(-1.5,14.4,-0.1),limit:110,lo:new vec3(-3.2,8.8,-1.8),hi:new vec3(-0.4,15.2,1.5),ball:new vec3(1.07,1.07,1.07),ballAt:new vec3(-1.3,14.6,-0.05)},
+  {name:"shinR",parent:"thighR",pivot:new vec3(-1.8,8,-0.25),limit:140,lo:new vec3(-3.6,0,-2.6),hi:new vec3(-0.8,7.8,2.2),hinge:KNEE,sleeve:KNEE_SLEEVES.R},
+  {name:"handL",parent:"foreArmL",pivot:new vec3(4.45,13.4,0.05),limit:80,lo:new vec3(3.5,10.4,-0.8),hi:new vec3(5,13.4,1.1),ball:new vec3(0.38,0.38,0.38)},
+  {name:"handR",parent:"foreArmR",pivot:new vec3(-4.45,13.4,0.05),limit:80,lo:new vec3(-5,10.4,-0.8),hi:new vec3(-3.5,13.4,1.1),ball:new vec3(0.38,0.38,0.38)},
 ];
 export const DUMMY_PART_COUNT=JOINTS.length;
 /** The seated subject is the same posable dummy, starting from this pose: thighs forward, shins down,
@@ -41,14 +50,18 @@ const JOINT_UV=new vec2(0.0083,0.1294);
 // Extra room around each piece's grab box (model cm), so thin forearms are easy to catch.
 const GRAB_PAD=0.8;
 
-type Drag={bottom:number;interactor:Interactor;node:SceneObject;limit:number;direct:boolean;distance:number;from:vec3;start:quat};
+type Drag={bottom:number;interactor:Interactor;node:SceneObject;joint:{limit:number;hinge?:Hinge};direct:boolean;distance:number;from:vec3;start:quat};
 
 export class PosableDummy {
   readonly root:SceneObject;
   private nodes:{[name:string]:SceneObject}={};
   private visuals:RenderMeshVisual[]=[];
+  // Just the imported pieces: the code-built sleeves and balls don't report reliable bounds, and the
+  // pieces alone already span the whole figure.
+  private pieceVisuals:RenderMeshVisual[]=[];
   private grabs:SceneObject[]=[];
   private dots:SceneObject[]=[];
+  private sleeves:{builder:MeshBuilder;data:SleeveData;center:vec3;axis:vec3;node:SceneObject;angle:number}[]=[];
   private editable=true;
   private drag:Drag=null;
   /** Called when a limb is let go, with where the dummy's lowest point was before the move. */
@@ -60,6 +73,13 @@ export class PosableDummy {
     const dots=dotMaterial?dotMaterial.clone():null;
     // The dots sit inside the body at the joint centres, so they draw on top.
     if(dots){dots.mainPass.depthTest=false;dots.mainPass.depthWrite=false;}
+    // Without the input, fall back to the pieces' own imported material, so the joint balls, caps and
+    // knee sleeves still get built (and match the pieces).
+    if(!material){
+      const probe=prefabs[0].instantiate(this.root);
+      material=collectVisuals(probe)[0]?.mainMaterial??null;
+      probe.destroy();
+    }
     JOINTS.forEach((j,i)=>{
       const node=global.scene.createSceneObject(j.name);
       const parentSpec=j.parent?JOINTS.find(p=>p.name===j.parent):null;
@@ -73,15 +93,17 @@ export class PosableDummy {
         if(material)v.mainMaterial=material;
         v.meshShadowMode=MeshShadowMode.Both;
       }
-      this.visuals.push(...visuals);
+      this.visuals.push(...visuals);this.pieceVisuals.push(...visuals);
       // The joint ball belongs to the parent piece, so it stays put as a socket while the limb turns in it.
       if(j.ball&&material)this.addBall(j.parent?this.nodes[j.parent]:this.root,(j.ballAt??j.pivot).sub(parentSpec?parentSpec.pivot:vec3.zero()),j.ball,material);
+      if(j.sleeve&&j.hinge&&material)this.addSleeve(j.parent?this.nodes[j.parent]:this.root,parentSpec?parentSpec.pivot:vec3.zero(),node,j.pivot,j.hinge.axis,j.sleeve,material);
       if(j.limit>0){
         this.addGrab(node,j);
         if(dots)this.addDot(node,dots);
       }
     });
     if(pose)this.applyPose(pose);
+    this.update();
     this.setEditable(false);
   }
   /** Limbs can be grabbed (and the joint dots show) only while editing. */
@@ -92,16 +114,27 @@ export class PosableDummy {
     for(const d of this.dots)d.enabled=on;
     if(!on)this.drag=null;
   }
+  /** Keeps the bendy joints (knee sleeves) in step with their joints. Cheap when nothing moved. */
+  update():void {
+    for(const sl of this.sleeves){
+      if(isNull(sl.node))continue;
+      const q=sl.node.getTransform().getLocalRotation(),a=sl.axis;
+      const angle=2*Math.atan2(q.x*a.x+q.y*a.y+q.z*a.z,q.w);
+      if(Math.abs(angle-sl.angle)<0.002)continue;
+      sl.angle=angle;
+      this.bendSleeve(sl);
+    }
+  }
   /** World Y of the dummy's lowest point, whatever its pose. */
   bottom():number {
     let y=Infinity;
-    for(const v of this.visuals)if(!isNull(v))y=Math.min(y,v.worldAabbMin().y);
+    for(const v of this.pieceVisuals)if(!isNull(v))y=Math.min(y,v.worldAabbMin().y);
     return y;
   }
   /** World Y of the dummy's highest point, whatever its pose. */
   top():number {
     let y=-Infinity;
-    for(const v of this.visuals)if(!isNull(v))y=Math.max(y,v.worldAabbMax().y);
+    for(const v of this.pieceVisuals)if(!isNull(v))y=Math.max(y,v.worldAabbMax().y);
     return y;
   }
   pose():DummyPose {
@@ -119,7 +152,7 @@ export class PosableDummy {
       const len=Math.hypot(v[0],v[1],v[2],v[3]);
       if(len<0.5)continue;
       const q=new quat(v[0]/len,v[1]/len,v[2]/len,v[3]/len);
-      this.nodes[j.name].getTransform().setLocalRotation(clampTurn(q,j.limit));
+      this.nodes[j.name].getTransform().setLocalRotation(constrain(q,j));
     }
   }
   resetPose():void {
@@ -129,7 +162,7 @@ export class PosableDummy {
   }
 
   /** A grab box around the piece: pulling it swings the piece about its joint toward the hand. */
-  private addGrab(node:SceneObject,j:{pivot:vec3;limit:number;lo:vec3;hi:vec3}):void {
+  private addGrab(node:SceneObject,j:{pivot:vec3;limit:number;lo:vec3;hi:vec3;hinge?:Hinge}):void {
     const lo=j.lo,hi=j.hi;
     const grab=global.scene.createSceneObject("Grab");grab.setParent(node);
     grab.getTransform().setLocalPosition(lo.add(hi).uniformScale(0.5).sub(j.pivot));
@@ -147,7 +180,7 @@ export class PosableDummy {
       if(!hit||!it.startPoint)return;
       const from=this.toParent(node,hit);
       if(from.length<0.01)return;
-      this.drag={bottom:this.bottom(),interactor:it,node,limit:j.limit,direct,distance:hit.distance(it.startPoint),from,start:node.getTransform().getLocalRotation()};
+      this.drag={bottom:this.bottom(),interactor:it,node,joint:j,direct,distance:hit.distance(it.startPoint),from,start:node.getTransform().getLocalRotation()};
     });
     input.onTriggerUpdate.add(e=>{
       const d=this.drag;
@@ -160,7 +193,7 @@ export class PosableDummy {
       const to=this.toParent(node,point);
       if(to.length<0.01)return;
       const turn=quat.rotationFromTo(d.from.normalize(),to.normalize());
-      node.getTransform().setLocalRotation(clampTurn(turn.multiply(d.start),d.limit));
+      node.getTransform().setLocalRotation(constrain(turn.multiply(d.start),d.joint));
     });
     const end=()=>{
       if(!this.drag||this.drag.node!==node)return;
@@ -176,6 +209,45 @@ export class PosableDummy {
     const pivot=node.getTransform().getWorldPosition();
     const parentRot=node.getParent().getTransform().getWorldRotation();
     return parentRot.invert().multiplyVec3(world.sub(pivot));
+  }
+  /** A short band of the original mesh around a hinge, rebuilt as it bends: each vertex turns about the
+   * joint by a share of the bend that grows from 0 at the parent's edge to all of it at the child's, so
+   * the surface stretches smoothly across the joint. Lives in the parent's frame (model coords). */
+  private addSleeve(parent:SceneObject,parentPivot:vec3,node:SceneObject,center:vec3,axis:vec3,data:SleeveData,material:Material):void {
+    const so=global.scene.createSceneObject("Sleeve");so.setParent(parent);
+    so.getTransform().setLocalPosition(parentPivot.uniformScale(-1));
+    const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"texture0",components:2}]);
+    b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
+    const v=data.v,count=v.length/8;
+    // Two copies: the outside, and a flipped inside (reversed winding, normals inverted). The material
+    // culls back faces, so this way the band shows whichever way its faces came out of the import.
+    for(let side=0;side<2;side++)for(let k=0;k<v.length;k+=8){
+      const f=side?-1:1;
+      b.appendVerticesInterleaved([v[k],v[k+1],v[k+2],v[k+3]*f,v[k+4]*f,v[k+5]*f,v[k+6],1-v[k+7]]);
+    }
+    const idx=data.i.slice();
+    for(let t=0;t<data.i.length;t+=3)idx.push(data.i[t]+count,data.i[t+2]+count,data.i[t+1]+count);
+    b.appendIndices(idx);
+    const visual=so.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    visual.mesh=b.getMesh();visual.mainMaterial=material;b.updateMesh();
+    visual.meshShadowMode=MeshShadowMode.Both;
+    this.visuals.push(visual);
+    this.sleeves.push({builder:b,data,center,axis,node,angle:0});
+  }
+  private bendSleeve(sl:{builder:MeshBuilder;data:SleeveData;center:vec3;axis:vec3;angle:number}):void {
+    const v=sl.data.v,c=sl.center;
+    // The band's top (parent side) and bottom (child side), from the data itself.
+    let top=-Infinity,bot=Infinity;
+    for(let k=1;k<v.length;k+=8){top=Math.max(top,v[k]);bot=Math.min(bot,v[k]);}
+    for(let k=0,n=0;k<v.length;k+=8,n++){
+      const t=Math.min(1,Math.max(0,(top-v[k+1])/(top-bot))),w=t*t*(3-2*t);
+      const r=quat.angleAxis(sl.angle*w,sl.axis);
+      const p=r.multiplyVec3(new vec3(v[k]-c.x,v[k+1]-c.y,v[k+2]-c.z)).add(c);
+      const nn=r.multiplyVec3(new vec3(v[k+3],v[k+4],v[k+5]));
+      sl.builder.setVertexInterleaved(n,[p.x,p.y,p.z,nn.x,nn.y,nn.z,v[k+6],1-v[k+7]]);
+      sl.builder.setVertexInterleaved(n+v.length/8,[p.x,p.y,p.z,-nn.x,-nn.y,-nn.z,v[k+6],1-v[k+7]]);
+    }
+    sl.builder.updateMesh();
   }
   private addBall(parent:SceneObject,at:vec3,radii:vec3,material:Material):void {
     const ball=global.scene.createSceneObject("Joint ball");ball.setParent(parent);
@@ -215,6 +287,17 @@ export class PosableDummy {
   }
 }
 
+/** Keeps a joint's turn natural: a hinge only bends about its axis within its range; anything else may
+ * turn any way up to `limit` degrees from rest. */
+function constrain(q:quat,j:{limit:number;hinge?:Hinge}):quat {
+  if(!j.hinge)return clampTurn(q,j.limit);
+  // The part of the turn about the hinge axis (swing-twist), clamped to the hinge's range.
+  const a=j.hinge.axis;
+  let angle=2*Math.atan2(q.x*a.x+q.y*a.y+q.z*a.z,q.w)*180/Math.PI;
+  if(angle>180)angle-=360;else if(angle<-180)angle+=360;
+  angle=Math.max(j.hinge.min,Math.min(j.hinge.max,angle));
+  return quat.angleAxis(angle*Math.PI/180,a);
+}
 /** Limits a joint's turn from rest to `limit` degrees. */
 function clampTurn(q:quat,limit:number):quat {
   if(q.w<0)q=new quat(-q.w,-q.x,-q.y,-q.z);

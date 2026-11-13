@@ -80,7 +80,8 @@ const KIT_DELAY=0.6;
 const TIPS:{[id:string]:Tip}={
   place:{title:"Point and pinch",body:"to drop it on the floor.",icon:requireAsset("../Icons/arrow_forward.png") as Texture},
   grab:{title:"Grab it like a real object.",body:"Close your hand to pick it up, open to put it down.",icon:requireAsset("../Icons/pan_tool.png") as Texture},
-  edit:{title:"Need it exact?",body:"Tap the pencil for arrows and a rotate ring.",icon:requireAsset("../Icons/edit.png") as Texture},
+  edit:{title:"Click edit",body:"to adjust tilt, rotation, and position.",icon:requireAsset("../Icons/edit.png") as Texture},
+  pose:{title:"Click edit",body:"to adjust pose.",icon:requireAsset("../Icons/edit.png") as Texture},
   dials:{title:"Twist the dials",body:"like you would on set.",icon:requireAsset("../Icons/rotate_right.png") as Texture},
   note:{title:"Leave yourself a note",body:"for this angle.",icon:requireAsset("../Icons/sticky_note_2.png") as Texture},
   capture:{title:"See what it sees.",body:"Walk to the camera to grab a reference shot.",icon:requireAsset("../Icons/photo_camera.png") as Texture},
@@ -203,7 +204,7 @@ export class ScoutMain extends BaseScriptComponent {
   @input @allowUndefined lightPrefab:ObjectPrefab;
   @input @allowUndefined standingPrefab:ObjectPrefab;
   @input @allowUndefined seatedPrefab:ObjectPrefab;
-  @input @allowUndefined @hint("Posable dummy pieces (GeneratedMeshes/Dummy): pelvis, torso, head, upper arm L, forearm L, upper arm R, forearm R, thigh L, shin L, thigh R, shin R") dummyParts:ObjectPrefab[];
+  @input @allowUndefined @hint("Posable dummy pieces (GeneratedMeshes/Dummy): pelvis, torso, head, upper arm L, forearm L, upper arm R, forearm R, thigh L, shin L, thigh R, shin R, hand L, hand R") dummyParts:ObjectPrefab[];
   @input @allowUndefined @hint("The standing dummy's own material, for the posable pieces") dummyMaterial:Material;
   // Onboarding workbench gear (generated models); any left empty is simply skipped.
   @input @allowUndefined workbenchPrefab:ObjectPrefab;
@@ -358,7 +359,11 @@ export class ScoutMain extends BaseScriptComponent {
       onEnd:(root,moved)=>{
         this.lastAction=getTime();
         this.setCanDrag(root,this.selected===HAND_KIND);
-        if(moved){this.settleOnSurface(root);this.placeAudio.play(1);this.tips.show("edit");}
+        if(moved){
+          this.settleOnSurface(root);this.placeAudio.play(1);
+          const k=this.kinds[this.placed.indexOf(root)];
+          this.tips.show(k===3||k===4?"pose":"edit");
+        }
       },
     });
     this.angleCapture=new ScoutAngleCapture(this.markerMaterial,this.camera,
@@ -902,6 +907,10 @@ export class ScoutMain extends BaseScriptComponent {
     console.log("Scout placed "+label);
     this.tips.done("place");
     this.toolkitCard.close();
+    // First thing after placing: how to fine-tune it (tilt, rotation, position) — then the rest.
+    // Dummies get their own: in edit mode their limbs can be posed.
+    if(kind===3||kind===4)this.tips.show("pose");
+    else if(kind!==2)this.tips.show("edit");
     if(kind===0||kind===1)this.tips.show("dials");
     if(kind===0)this.tips.show("capture");
     if(kind===2)this.tips.show("note");
@@ -994,6 +1003,7 @@ export class ScoutMain extends BaseScriptComponent {
     for(const [root,dummy] of this.dummies){
       if(isNull(root)||isNull(dummy.root)){this.dummies.delete(root);continue}
       dummy.setEditable(this.gizmo.isEditing(root)||dummy.dragging);
+      dummy.update();
     }
   }
   /** Each camera's height slider and tilt wheel show only while it's in edit mode (or mid-drag), so
@@ -1254,7 +1264,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.lastAction=getTime();
     const idx=this.placed.indexOf(root);
     if(idx<0)return;
-    this.tips.done("edit");
+    this.tips.done(this.kinds[idx]===3||this.kinds[idx]===4?"pose":"edit");
     if(this.gizmo.isEditing(root)){this.gizmo.select(null);this.editing=null;return}
     this.editing=root;
     const allowVertical=this.kinds[idx]===3||this.kinds[idx]===4;
