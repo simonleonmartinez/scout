@@ -2,6 +2,7 @@ import {ScoutTransformGizmo} from "./ScoutTransformGizmo";
 import {ScoutSharedSession} from "./ScoutSharedSession";
 import {parseLayout,ScoutLayout,MarkerRecord} from "./ScoutLayout";
 import {ScoutPaletteUI} from "./ScoutPaletteUI";
+import {PosableDummy,DummyPose,DUMMY_PART_COUNT,SEATED_POSE} from "./ScoutPosableDummy";
 import {buildMarkerMesh, NOTE_PIN_HEIGHT} from "./ScoutMarkerMesh";
 import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {InteractableManipulation} from "SpectaclesInteractionKit.lspkg/Components/Interaction/InteractableManipulation/InteractableManipulation";
@@ -26,7 +27,7 @@ import {BodyKind,CameraRig,HeightSlider,LightRig,RigPrefabs,TiltRig,TiltWheel,ri
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
  * facing direction), h is height above the floor, r is yaw relative to the user's. */
-type SavedMarker={k:number;l:string;x:number;z:number;h:number;r:number;c?:CameraAssetState;li?:LightAssetState;n?:NoteAssetState};
+type SavedMarker={k:number;l:string;x:number;z:number;h:number;r:number;c?:CameraAssetState;li?:LightAssetState;n?:NoteAssetState;ps?:DummyPose};
 type SavedPoster={x:number;z:number;h:number;r:number};
 // o: the room outline's corners as flat x,z pairs in the same frame — when present, the frame is the
 // outline's rather than the user's, and loading lets the user line the outline up with the real room.
@@ -202,6 +203,8 @@ export class ScoutMain extends BaseScriptComponent {
   @input @allowUndefined lightPrefab:ObjectPrefab;
   @input @allowUndefined standingPrefab:ObjectPrefab;
   @input @allowUndefined seatedPrefab:ObjectPrefab;
+  @input @allowUndefined @hint("Posable dummy pieces (GeneratedMeshes/Dummy): pelvis, torso, head, upper arm L, forearm L, upper arm R, forearm R, thigh L, shin L, thigh R, shin R") dummyParts:ObjectPrefab[];
+  @input @allowUndefined @hint("The standing dummy's own material, for the posable pieces") dummyMaterial:Material;
   // Onboarding workbench gear (generated models); any left empty is simply skipped.
   @input @allowUndefined workbenchPrefab:ObjectPrefab;
   @input @hint("Camera tripod parts: legs, column, head") classicRig:ObjectPrefab[];
@@ -281,6 +284,8 @@ export class ScoutMain extends BaseScriptComponent {
   // Each marker's floating UI pivot, turned to face the user (angle/target in radians about +Y).
   private facingUI:{root:SceneObject;pivot:SceneObject;facing:vec3;angle:number;target:number}[]=[];
   /** Camera props' height sliders: shown beside the prop only while it's in edit mode. */
+  /** Standing dummies whose limbs can be posed (in edit mode), by marker root. */
+  private dummies=new Map<SceneObject,PosableDummy>();
   private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:TiltRig;wheel:TiltWheel;afterAim?:()=>void}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
@@ -428,6 +433,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.gizmo.update();
     this.followPalette();
     this.updateHeightSliders();
+    this.updateDummies();
     const all=InteractionManager.getInstance().getInteractorsByType(InteractorInputType.All);
     all.forEach(interactor=>{
       if(this.interactors.indexOf(interactor)>=0)return;
@@ -592,15 +598,17 @@ export class ScoutMain extends BaseScriptComponent {
   /** World Y of a marker's lowest point, measured from its actual mesh so it's right whatever pivot the
    * model was exported with. */
   private bottomOf(root:SceneObject):number {
+    const dummy=this.dummies.get(root);
+    if(dummy&&!isNull(dummy.root))return dummy.bottom();
     const visual=findMeshVisual(root);
     return visual?visual.worldAabbMin().y:root.getTransform().getWorldPosition().y;
   }
   /** Drops `body` (a fresh marker's pivot, still at the root's origin) to its mesh's lowest point while
    * keeping the mesh where it is, so scaling `body` grows the prop up from its feet. */
-  private pivotAtFeet(root:SceneObject,body:SceneObject):void {
+  private pivotAtFeet(root:SceneObject,body:SceneObject,bottom?:number):void {
     const visual=findMeshVisual(body);
     if(!visual)return;
-    const feet=visual.worldAabbMin().y-root.getTransform().getWorldPosition().y;
+    const feet=(bottom??visual.worldAabbMin().y)-root.getTransform().getWorldPosition().y;
     body.getTransform().setLocalPosition(new vec3(0,feet,0));
     for(let i=0;i<body.getChildrenCount();i++){
       const t=body.getChild(i).getTransform();
@@ -981,6 +989,13 @@ export class ScoutMain extends BaseScriptComponent {
     }
     return this.tiltWheelMaterial;
   }
+  /** A dummy's limbs are grabbable (and its joints show) only while it's in edit mode. */
+  private updateDummies():void {
+    for(const [root,dummy] of this.dummies){
+      if(isNull(root)||isNull(dummy.root)){this.dummies.delete(root);continue}
+      dummy.setEditable(this.gizmo.isEditing(root)||dummy.dragging);
+    }
+  }
   /** Each camera's height slider and tilt wheel show only while it's in edit mode (or mid-drag), so
    * moving the camera can never change its height or tilt by accident. */
   private updateHeightSliders():void {
@@ -1032,7 +1047,7 @@ export class ScoutMain extends BaseScriptComponent {
     // Camera props stand on a rig whose centre column can rise (see ScoutCameraRig).
     const bodyKind=cameraState&&this.rigPrefabs()?this.bodyFor(cameraState):null;
     if(bodyKind)cameraState.body=bodyKind;
-    const height=bodyKind?rigHeight(bodyKind):MODEL_HEIGHTS[kind];
+    let height=bodyKind?rigHeight(bodyKind):MODEL_HEIGHTS[kind];
     let rig:CameraRig=null;
     let lightRigObj:LightRig=null;
     const lightState=kind===1?{...defaultLightState(),...saved?.lightState}:null;
@@ -1054,6 +1069,23 @@ export class ScoutMain extends BaseScriptComponent {
       lightRigObj=new LightRig(holder,this.lightRig,lightState.lift||0,0);
       this.pivotAtFeet(root,body);
       lightRef=this.buildKeyLight(lightRigObj.frame,lightState);
+    }else if((kind===3||kind===4)&&this.dummyParts?.length===DUMMY_PART_COUNT&&this.dummyParts.every(p=>!!p)){
+      // Both subjects are the dummy cut at its joints so its limbs can be posed (see ScoutPosableDummy);
+      // the seated one just starts sitting.
+      const dummy=new PosableDummy(body,this.dummyParts,this.dummyMaterial||null,this.markerMaterial,saved?.pose??(kind===4?SEATED_POSE:undefined));
+      const t=dummy.root.getTransform();
+      // Sized as the standing figure (the model is 30 tall) — sitting just bends it.
+      t.setLocalScale(vec3.one().uniformScale(MODEL_HEIGHTS[3]/30));
+      // Its height is whatever its pose makes it (sitting is shorter), and the label, buttons and collider
+      // all go by height — so measure it, and centre it on the marker like every other prop.
+      const rootY=root.getTransform().getWorldPosition().y,feet=dummy.bottom()-rootY;
+      height=dummy.top()-dummy.bottom();
+      t.setLocalPosition(new vec3(0,-height/2-feet,0));
+      this.pivotAtFeet(root,body,dummy.bottom());
+      this.dummies.set(root,dummy);
+      // Posing pivots at the joints, so bending the knees would leave it floating: let go, and its
+      // lowest point drops back to where it was.
+      dummy.onChanged=before=>{this.lastAction=getTime();if(!isNull(root))this.liftOnto(root,before);};
     }else if(prefab){
       const model=prefab.instantiate(body),t=model.getTransform();
       t.setLocalScale(t.getLocalScale().uniformScale(height/30));
@@ -1232,6 +1264,13 @@ export class ScoutMain extends BaseScriptComponent {
     this.gizmo.select(root,allowVertical,minRootY);
     this.gizmo.setMode("Show handles");
   }
+  /** A posed dummy's joint rotations, or undefined when it's at rest (or not a dummy). */
+  private poseOf(root:SceneObject):DummyPose|undefined {
+    const dummy=this.dummies.get(root);
+    if(!dummy||isNull(dummy.root))return undefined;
+    const pose=dummy.pose();
+    return Object.keys(pose).length?pose:undefined;
+  }
   private deleteMarker(root:SceneObject):void {
     this.lastAction=getTime();
     const idx=this.placed.indexOf(root);
@@ -1351,7 +1390,8 @@ export class ScoutMain extends BaseScriptComponent {
       m:this.placed.map((root,i)=>{
         const p=this.toFrame(frame,root.getTransform().getWorldPosition());
         return {k:this.kinds[i],l:root.name,x:round(p.x),z:round(p.z),h:round(this.bottomOf(root)-floor),
-          r:roundYaw(this.yawOf(root)-frame.yaw),c:this.cameraStates[i]||undefined,li:this.lightStates[i]||undefined,n:this.noteStates[i]||undefined};
+          r:roundYaw(this.yawOf(root)-frame.yaw),c:this.cameraStates[i]||undefined,li:this.lightStates[i]||undefined,n:this.noteStates[i]||undefined,
+          ps:this.poseOf(root)};
       }),
       p:this.posters.map(poster=>{
         const pos=poster.getTransform().getWorldPosition(),p=this.toFrame(frame,pos);
@@ -1392,7 +1432,7 @@ export class ScoutMain extends BaseScriptComponent {
     for(const m of data.m.slice(0,this.maxMarkers)){
       if(![0,1,2,3,4].includes(m.k))continue;
       const surface=floor+m.h;
-      const root=this.makeMarker(m.k,m.l,surface,{cameraState:m.c,lightState:m.li,noteState:m.n} as MarkerRecord);
+      const root=this.makeMarker(m.k,m.l,surface,{cameraState:m.c,lightState:m.li,noteState:m.n,pose:m.ps} as MarkerRecord);
       root.getTransform().setWorldPosition(this.fromFrame(frame,m.x,m.z,surface));
       root.getTransform().setWorldRotation(quat.angleAxis(frame.yaw+m.r,vec3.up()));
       this.liftOnto(root,surface);
@@ -1521,7 +1561,7 @@ export class ScoutMain extends BaseScriptComponent {
       return {kind:this.kinds[i],label:obj.name,position:[p.x,p.y,p.z],rotation:[q.w,q.x,q.y,q.z],
         cameraState:this.cameraStates[i]?{...this.cameraStates[i]}:undefined,
         lightState:this.lightStates[i]?{...this.lightStates[i]}:undefined,
-        noteState:this.noteStates[i]?{...this.noteStates[i]}:undefined};
+        noteState:this.noteStates[i]?{...this.noteStates[i]}:undefined,pose:this.poseOf(obj)};
     })};return JSON.stringify(data);
   }
   private restore(raw:string):void {

@@ -2675,6 +2675,19 @@
       lightPrefab: !<reference.ObjectPrefab> 8a4d422b-8fad-4cdc-9f95-c0a9a30a6027
       standingPrefab: !<reference.ObjectPrefab> ef8de357-600f-4e3e-bf56-86e692a66f9d
       seatedPrefab: !<reference.ObjectPrefab> 52dada4a-a82e-4212-bfd1-bc72b650c41f
+      dummyParts: !<reference.ObjectPrefab[]>
+        - !<reference> fa0304b7-df9c-4043-8c3f-2ef3b7cbba9e
+        - !<reference> b444632a-00c6-4a8c-9e5a-c2a486e86799
+        - !<reference> 2040b05d-5e61-49ba-a73c-111fb4b66b85
+        - !<reference> 7e908c42-30e3-4145-9362-f14a775dac40
+        - !<reference> 1abf21ab-6358-4dcb-a4b7-a78af38d9063
+        - !<reference> aa2a1273-3308-4fc7-b0c9-49a7e7c192f3
+        - !<reference> 4d4bc19a-27e6-42a7-a54f-edac9a2338fc
+        - !<reference> b508b57d-b17d-43ac-9cad-36232201eb23
+        - !<reference> 1db6bf57-3884-4547-af1d-33d6f702b6f1
+        - !<reference> a92e2f14-f747-43a1-b13a-3086918fbb21
+        - !<reference> 3f0294cc-e1f8-43f1-9b02-bebf1a2e59fe
+      dummyMaterial: !<reference.Material> c5bfe75a-9ef9-4c5d-b761-0cab5b0d7a03
       workbenchPrefab: !<reference.ObjectPrefab> e146f070-abf6-4b90-8a49-1fad9d861877
       classicRig: !<reference.ObjectPrefab[]>
         - !<reference> fa18e9a9-c3b0-4aa6-9d6c-ee52baeda6ca
