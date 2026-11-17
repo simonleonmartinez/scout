@@ -53,7 +53,11 @@ const JOINT_UV=new vec2(0.0083,0.1294);
 // Extra room around each piece's grab box (model cm), so thin forearms are easy to catch.
 const GRAB_PAD=0.8;
 
-type Drag={bottom:number;interactor:Interactor;node:SceneObject;joint:{limit:number;hinge?:Hinge};direct:boolean;distance:number;from:vec3;start:quat};
+/** A knee drag's hold on the thigh: the hand's sideways pull rolls the thigh about its own length. */
+type Twist={thigh:SceneObject;axis:vec3;start:quat;frame:quat;from:vec3;limit:number};
+type Drag={bottom:number;interactor:Interactor;node:SceneObject;joint:{limit:number;hinge?:Hinge};direct:boolean;distance:number;from:vec3;start:quat;twist:Twist|null};
+// How far a knee drag may roll its thigh either way (degrees).
+const THIGH_ROLL=75;
 
 export class PosableDummy {
   readonly root:SceneObject;
@@ -177,7 +181,7 @@ export class PosableDummy {
   }
 
   /** A grab box around the piece: pulling it swings the piece about its joint toward the hand. */
-  private addGrab(node:SceneObject,j:{pivot:vec3;limit:number;lo:vec3;hi:vec3;hinge?:Hinge}):void {
+  private addGrab(node:SceneObject,j:{pivot:vec3;limit:number;lo:vec3;hi:vec3;hinge?:Hinge;parent?:string|null}):void {
     const lo=j.lo,hi=j.hi;
     const grab=global.scene.createSceneObject("Grab");grab.setParent(node);
     grab.getTransform().setLocalPosition(lo.add(hi).uniformScale(0.5).sub(j.pivot));
@@ -195,7 +199,7 @@ export class PosableDummy {
       if(!hit||!it.startPoint)return;
       const from=this.toParent(node,hit);
       if(from.length<0.01)return;
-      this.drag={bottom:this.bottom(),interactor:it,node,joint:j,direct,distance:hit.distance(it.startPoint),from,start:node.getTransform().getLocalRotation()};
+      this.drag={bottom:this.bottom(),interactor:it,node,joint:j,direct,distance:hit.distance(it.startPoint),from,start:node.getTransform().getLocalRotation(),twist:this.twistFor(node,j,hit)};
     });
     input.onTriggerUpdate.add(e=>{
       const d=this.drag;
@@ -205,6 +209,7 @@ export class PosableDummy {
       if(!it.startPoint||(!d.direct&&!it.direction))return;
       // Up close the hand is the target; from afar, a point along the ray at the distance it grabbed at.
       const point=d.direct?it.startPoint:it.startPoint.add(it.direction.uniformScale(d.distance));
+      if(d.twist)this.rollThigh(d.twist,node,point);
       const to=this.toParent(node,point);
       if(to.length<0.01)return;
       const turn=quat.rotationFromTo(d.from.normalize(),to.normalize());
@@ -218,6 +223,31 @@ export class PosableDummy {
     };
     input.onTriggerEnd.add(end);input.onTriggerEndOutside.add(end);input.onTriggerCanceled.add(end);
     this.grabs.push(grab);
+  }
+  /** A knee only folds one way, so pulling the shin sideways can't move it on its own: instead that pull
+   * rolls the thigh about its own length (hip to knee), which swings the bent shin round to follow — how
+   * you'd turn a bent leg's knee in or out. Set up at grab time, in the thigh's frame as it was then. */
+  private twistFor(node:SceneObject,j:{pivot:vec3;hinge?:Hinge;parent?:string|null},hit:vec3):Twist|null {
+    if(!j.hinge||!j.parent)return null;
+    const parentSpec=JOINTS.find(p=>p.name===j.parent);
+    if(!parentSpec)return null;
+    const thigh=node.getParent();
+    const start=thigh.getTransform().getLocalRotation();
+    const frame=thigh.getParent().getTransform().getWorldRotation().multiply(start);
+    const from=frame.invert().multiplyVec3(hit.sub(node.getTransform().getWorldPosition()));
+    return {thigh,axis:j.pivot.sub(parentSpec.pivot).normalize(),start,frame,from,limit:parentSpec.limit};
+  }
+  private rollThigh(tw:Twist,node:SceneObject,point:vec3):void {
+    // The knee sits on the roll axis, so it stays put; compare where the grab and the hand sit around it.
+    const to=tw.frame.invert().multiplyVec3(point.sub(node.getTransform().getWorldPosition()));
+    const L=tw.axis,flat=(v:vec3)=>v.sub(L.uniformScale(v.dot(L)));
+    const a=flat(tw.from),b=flat(to);
+    // A straight leg has nothing sticking out sideways to turn by: leave the thigh alone.
+    if(a.length<0.3*tw.from.length||b.length<0.01)return;
+    let angle=Math.atan2(L.dot(a.cross(b)),a.dot(b))*180/Math.PI;
+    angle=Math.max(-THIGH_ROLL,Math.min(THIGH_ROLL,angle));
+    const q=tw.start.multiply(quat.angleAxis(angle*Math.PI/180,L));
+    tw.thigh.getTransform().setLocalRotation(clampTurn(q,tw.limit));
   }
   /** `world` relative to `node`'s pivot, in its parent's rotation frame (scale only shortens it). */
   private toParent(node:SceneObject,world:vec3):vec3 {
