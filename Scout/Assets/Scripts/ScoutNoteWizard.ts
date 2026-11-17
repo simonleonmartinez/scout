@@ -3,6 +3,7 @@ import {addBackPlateHover} from "./ScoutHover";
 import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
 import {RoundedRectangle} from "UIKit.lspkg/Scripts/Visuals/RoundedRectangle/RoundedRectangle";
 import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
+import {buildNotebookBody} from "./ScoutNotebookMesh";
 import {NoteAssetState,SHOT_TYPE_STEPS,MOVEMENT_STEPS,PHOTO_SHOT_TYPE_STEPS,PHOTO_ANGLE_STEPS,SCENE_PLACES,TIME_OF_DAY,NOTE_TEXT_MAX} from "./ScoutAssetState";
 
 const TRASH_ICON=requireAsset("../Icons/delete.png") as Texture;
@@ -31,7 +32,7 @@ export type NoteReference={
 
 // Palette: the lavender field-journal identity.
 const PAPER=rgb(0xE9E0F5),PAPER_2=rgb(0xF4EFF9),PURPLE=rgb(0x7656B5),INK=rgb(0x393047),ACCENT=rgb(0xAA91D5);
-const INK_SOFT=mix(INK,PAPER,0.38),SHEET=mix(PAPER,ACCENT,0.28),RULE=mix(PAPER,ACCENT,0.55);
+const INK_SOFT=mix(INK,PAPER,0.38),RULE=mix(PAPER,ACCENT,0.55);
 const READY=new vec4(0.84,0.93,0.84,1),READY_DOT=new vec4(0.30,0.66,0.38,1),DRAFT=mix(PAPER_2,ACCENT,0.3);
 const FILM=mix(INK,PURPLE,0.25),WHITE=new vec4(1,1,1,1);
 
@@ -40,13 +41,13 @@ const FILM=mix(INK,PURPLE,0.25),WHITE=new vec4(1,1,1,1);
 const CARD_SCALE=0.8;
 const W=84,PAD=5,INNER=W-PAD*2;
 const RADIUS=4.5;
-// The pointer: a short, wide, smoothly tapered tail under the card's bottom centre, pointing at the
-// note's spot on the floor.
-const POINTER_H=13,POINTER_W=24;
+// How far above the dotted floor guide's top the notebook's bottom edge floats, and how far it leans
+// back (degrees) so its thickness and spiral binding read as a real 3D book.
+const FLOAT=3,LEAN=9;
 // Text sizes (Lens Text points).
 const T_TITLE=520,T_STEP=290,T_VALUE=175,T_BODY=150,T_LABEL=100,T_HAND=205;
 
-/** A Note: a floating lavender field-journal card on a short speech-bubble pointer. It walks through a
+/** A Note: a lavender spiral-bound field journal hovering above its spot. It walks through a
  * few quick picks (Shot #, framing, movement or angle, scene setup), then shows the finished page: scene
  * title and setup, shot details, the director's handwritten notes (typed with the Specs keyboard), and a
  * reference frame borrowed from the nearest camera. `scheduleDelay` is injected because this is a plain
@@ -62,7 +63,8 @@ export class ScoutNoteWizard {
     this.root=this.obj(parent,"Note wizard",new vec3(pos.x,pos.y,4));
     this.root.getTransform().setLocalScale(vec3.one().uniformScale(CARD_SCALE));
     this.root.createComponent("Component.Canvas");
-    this.card=this.obj(this.root,"Card",new vec3(0,POINTER_H,0));
+    this.card=this.obj(this.root,"Card",new vec3(0,FLOAT,0));
+    this.card.getTransform().setLocalRotation(quat.angleAxis(-LEAN*Math.PI/180,vec3.right()));
     this.rebuild();
   }
 
@@ -110,41 +112,19 @@ export class ScoutNoteWizard {
   // ─── The paper: back sheets, the page, its border, the pointer and the tab ───────────────────────────
   /** The card body for content `h` tall, sitting on the pointer; content is laid out from its top. */
   private buildPaper(host:SceneObject,h:number):void {
-    // Two sheets peeking out behind the page give it a little stacked-paper depth.
-    // The page sits a little behind the content plane (z<0): its backing has some thickness and would
-    // otherwise hide anything laid right on top of it.
-    this.rect(host,"Sheet 2",new vec3(1.6,h/2-1.8,-1.4),W,h,SHEET,RADIUS);
-    this.rect(host,"Sheet 1",new vec3(0.8,h/2-0.9,-1.2),W,h,mix(SHEET,PAPER,0.5),RADIUS);
+    // A real 3D notebook: back cover, stacked pages and a spiral binding, all behind the top page.
+    // The page itself sits a little behind the content plane (z<0): its backing has some thickness and
+    // would otherwise hide anything laid right on top of it.
+    const book=this.obj(host,"Book",new vec3(0,0,-1.05));
+    buildNotebookBody(book,this.material,W,h,RADIUS,{});
     const page=this.rect(host,"Page",new vec3(0,h/2,-1),W,h,PAPER,RADIUS);
     page.border=true;page.borderSize=0.22;page.borderColor=ACCENT;
-    this.buildPointer(host);
     // The notebook tab on the top edge, labelled with the note's name.
     const tab=this.obj(host,"Tab",new vec3(-W/2+17,h+3.2,-1.1));
     this.rect(tab,"Tab paper",new vec3(0,0,0),26,9.5,mix(PAPER,ACCENT,0.42),2.4);
     this.icon(tab,this.photo?PHOTO_ICON:MOVIE_ICON,new vec3(-8.5,0.6,0.2),4,INK);
     this.text(tab,this.label,new vec3(2.5,0.6,0.2),18,6,INK,T_BODY,this.theme.font,HorizontalAlignment.Center);
   }
-  /** A short, wide, smoothly tapered tail: flush with the card's bottom edge, narrowing to a point. */
-  private buildPointer(parent:SceneObject):void {
-    const so=this.obj(parent,"Pointer",new vec3(0,0,-1.02));
-    const b=this.meshBuilder();
-    const c=[PAPER.x,PAPER.y,PAPER.z,1];
-    const segs=10;
-    // Each side bows inward (a soft concave curve) so the tail tapers smoothly instead of a flat wedge;
-    // the top overlaps the card by a centimetre so the seam is hidden.
-    for(let i=0;i<=segs;i++){
-      const t=i/segs,y=1-t*(POINTER_H+1);
-      const half=(POINTER_W/2)*Math.pow(1-t,1.6);
-      b.appendVerticesInterleaved([-half,y,0,0,0,1,...c]);
-      b.appendVerticesInterleaved([half,y,0,0,0,1,...c]);
-    }
-    const ix:number[]=[];
-    for(let i=0;i<segs;i++){const a=i*2;ix.push(a,a+2,a+1,a+1,a+2,a+3,a,a+1,a+2,a+1,a+3,a+2);}
-    b.appendIndices(ix);
-    const v=so.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-    v.mesh=b.getMesh();v.mainMaterial=this.material.clone();b.updateMesh();
-  }
-
   // ─── Steps ───────────────────────────────────────────────────────────────────────────────────────────
   /** Step 0: a fresh page with one action. */
   private buildStepWrite():number {

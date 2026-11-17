@@ -1,3 +1,4 @@
+import {buildNotebookBody} from "./ScoutNotebookMesh";
 // Geometry helpers adapted from Snap CLAD. Copyright 2026 Specs Inc.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -38,40 +39,44 @@ export function buildWaypointPin(root:SceneObject, material:Material, height:num
   return root;
 }
 
-/** The Note tool's aiming ghost: a miniature of the field-journal card (page, tab, a few lines of text)
- * standing on its pointer over a small floor disc — about 30cm tall, like the other tools' ghosts.
- * Flat and double-sided, in the card's lavender. */
+/** The Note tool's aiming ghost: a miniature of the 3D spiral notebook (cover, page block, binding)
+ * with a few lines of "writing", hovering over a small floor disc — about 30cm tall, like the other tools'
+ * ghosts. */
 export function buildNoteGhost(parent:SceneObject, material:Material):SceneObject {
   const root=global.scene.createSceneObject("Note preview");root.setParent(parent);
-  const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
-  b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
-  const paper:[number,number,number,number]=[0.914,0.878,0.961,1],purple:[number,number,number,number]=[0.463,0.337,0.71,1];
-  const lav:[number,number,number,number]=[0.667,0.569,0.835,1],tab:[number,number,number,number]=[0.80,0.73,0.90,1];
-  const ix:number[]=[];let vi=0;
-  const quad=(x0:number,y0:number,x1:number,y1:number,z:number,c:number[])=>{
-    for(const [x,y] of [[x0,y0],[x1,y0],[x1,y1],[x0,y1]])b.appendVerticesInterleaved([x,y,z,0,0,1,...c]);
-    ix.push(vi,vi+1,vi+2,vi,vi+2,vi+3,vi,vi+2,vi+1,vi,vi+3,vi+2);vi+=4;
-  };
-  const tri=(pts:number[][],z:number,c:number[])=>{
-    pts.forEach(p=>b.appendVerticesInterleaved([p[0],p[1],z,0,0,1,...c]));
-    ix.push(vi,vi+1,vi+2,vi,vi+2,vi+1);vi+=3;
-  };
   // Floor disc.
-  const segs=16;b.appendVerticesInterleaved([0,0.3,0,0,1,0,...lav]);
-  for(let i=0;i<=segs;i++){const a=i*2*Math.PI/segs;b.appendVerticesInterleaved([3*Math.cos(a),0.3,3*Math.sin(a),0,1,0,...lav]);}
-  for(let i=1;i<=segs;i++)ix.push(vi,vi+i,vi+i+1,vi,vi+i+1,vi+i);vi+=segs+2;
-  // Pointer, page, tab, and a few "lines" of content.
-  tri([[-3.5,9.5],[3.5,9.5],[0,5]],0,paper);
-  quad(-9,9,9,29,0,paper);
-  quad(-8.5,29,-1.5,31.2,0,tab);
-  quad(-7,24.5,1,26.5,0.05,purple);
-  quad(-7,21.5,6.5,22.2,0.05,lav);
-  quad(-7,17.5,6.5,19.7,0.05,lav);
-  quad(-7,13.5,0,15.7,0.05,lav);
-  quad(2,11.4,7,13.4,0.05,purple);
-  b.appendIndices(ix);
-  const v=root.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-  v.mesh=b.getMesh();v.mainMaterial=material;b.updateMesh();
+  const disc=global.scene.createSceneObject("Disc");disc.setParent(root);
+  const db=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
+  db.topology=MeshTopology.Triangles;db.indexType=MeshIndexType.UInt16;
+  const lav=[0.667,0.569,0.835,1],segs=16,dix:number[]=[];
+  db.appendVerticesInterleaved([0,0.3,0,0,1,0,...lav]);
+  for(let i=0;i<=segs;i++){const a=i*2*Math.PI/segs;db.appendVerticesInterleaved([3*Math.cos(a),0.3,3*Math.sin(a),0,1,0,...lav]);}
+  for(let i=1;i<=segs;i++)dix.push(0,i,i+1,0,i+1,i);
+  db.appendIndices(dix);
+  const dv=disc.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+  dv.mesh=db.getMesh();dv.mainMaterial=material;db.updateMesh();
+  // The book, leaning back a little like the real note.
+  const book=global.scene.createSceneObject("Book");book.setParent(root);
+  book.getTransform().setLocalPosition(new vec3(0,8,0));
+  book.getTransform().setLocalRotation(quat.angleAxis(-9*Math.PI/180,vec3.right()));
+  buildNotebookBody(book,material,16,20,1.4,{thickness:1.2,sheets:3,coverMargin:0.6,coverThickness:0.5,rings:4,ringRadius:1,ringWire:0.2});
+  const page=global.scene.createSceneObject("Page");page.setParent(book);
+  const pb=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
+  pb.topology=MeshTopology.Triangles;pb.indexType=MeshIndexType.UInt16;
+  const pix:number[]=[];let vi=0;
+  const quad=(x0:number,y0:number,x1:number,y1:number,z:number,c:number[])=>{
+    for(const [x,y] of [[x0,y0],[x1,y0],[x1,y1],[x0,y1]])pb.appendVerticesInterleaved([x,y,z,0,0,1,...c]);
+    pix.push(vi,vi+1,vi+2,vi,vi+2,vi+3,vi,vi+2,vi+1,vi,vi+3,vi+2);vi+=4;
+  };
+  const purple=[0.463,0.337,0.71,1],line=[0.667,0.569,0.835,1];
+  quad(-4.5,14.6,3,16.4,0.12,purple);
+  quad(-4.5,11.6,6,12.2,0.12,line);
+  quad(-4.5,8.6,6,9.2,0.12,line);
+  quad(-4.5,5.6,4,6.2,0.12,line);
+  quad(1.5,2.2,6,3.6,0.12,purple);
+  pb.appendIndices(pix);
+  const pv=page.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+  pv.mesh=pb.getMesh();pv.mainMaterial=material;pb.updateMesh();
   return root;
 }
 
