@@ -53,11 +53,22 @@ export function kelvinToRGB(kelvin:number):vec3 {
 
 /** Note Asset state — the shot this waypoint pin annotates. `step` drives which page of the wizard is
  * showing (0=Write note? button, 1=shot number, 2=shot type, 3=movement, 4=done/summary); the other
- * fields hold what's been picked so far. Every placed Note gets its own instance, same as Camera/Light.
+ * fields hold what's been picked so far. Step 5 is scene setup (INT/EXT, time of day), asked after step 3
+ * and before the finished note (step 4). Every placed Note gets its own instance, same as Camera/Light.
  * On a photo shoot the same fields hold the photo lists below: there's no shot number (photos have no
  * running order, so step 1 is skipped), shotType indexes PHOTO_SHOT_TYPE_STEPS and movementType indexes
  * PHOTO_ANGLE_STEPS. */
-export type NoteAssetState={step:0|1|2|3|4;shotNumber:number;shotType:number|null;movementType:number|null};
+export type NoteAssetState={step:0|1|2|3|4|5;shotNumber:number;shotType:number|null;movementType:number|null;
+  /** Scene setup (step 5): 0 = INT., 1 = EXT. */
+  interior?:number|null;
+  /** Scene setup: an index into TIME_OF_DAY. */
+  timeOfDay?:number|null;
+  /** The director's notes, typed with the Specs keyboard. */
+  notes?:string};
+export const SCENE_PLACES=["INT.","EXT."];
+export const TIME_OF_DAY=["DAY","NIGHT","GOLDEN HOUR"];
+/** Longest director's note kept (characters). */
+export const NOTE_TEXT_MAX=240;
 export function defaultNoteState():NoteAssetState {
   return {step:0,shotNumber:1,shotType:null,movementType:null};
 }

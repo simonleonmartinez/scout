@@ -6,7 +6,7 @@ import {FlexItem} from "UIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexItem";
 import {FlexAlign, FlexAlignSelf, FlexDirection, FlexJustify} from "UIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexTypes";
 import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {ScoutRotaryDial, RotaryDialTheme, DialStep} from "./ScoutRotaryDial";
-import {ScoutNoteWizard, NoteWizardTheme} from "./ScoutNoteWizard";
+import {ScoutNoteWizard, NoteWizardTheme, NoteReference} from "./ScoutNoteWizard";
 import {addBackPlateHover, addHoverFeedback} from "./ScoutHover";
 import type {SavedLayoutInfo} from "./ScoutLayoutStore";
 import {CameraAssetState, LightAssetState, NoteAssetState, ISO_STOPS, APERTURE_STOPS, SHUTTER_STOPS, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
@@ -52,12 +52,6 @@ const DIAL_TICK_TINT=new vec4(0.66,0.66,0.7,1);
 const DIAL_PANEL_TINT=new vec4(0.1,0.1,0.11,1);
 // The Note asset reads as an actual paper notepad, not equipment or menu chrome — a light lavender-grey
 // page with dark text, kept strictly to the lavender/grey family (no blue or cyan anywhere in it).
-const NOTE_PAPER_TINT=new vec4(0.87,0.85,0.91,1);
-const NOTE_TEXT_TINT=new vec4(0.22,0.20,0.28,1);
-const NOTE_ACCENT_TINT=new vec4(0.42,0.32,0.82,1);
-const NOTE_IDLE_TINT=new vec4(0.64,0.60,0.74,1);
-const NOTE_HOVER_TINT=new vec4(0.72,0.68,0.82,1);
-const NOTE_ACTIVE_TINT=new vec4(0.50,0.42,0.78,1);
 // Camera angle monitor: width (cm), backward tilt (degrees), and its gear-style inks.
 const ANGLE_SCREEN_W=36,ANGLE_SCREEN_TILT=12;
 const ANGLE_INK=new vec4(0.93,0.88,0.78,1);
@@ -111,6 +105,8 @@ export interface AngleScreen {
   setStatus(text:string):void;
   /** The photo shown once the state is captured or stale. */
   setImage(texture:Texture):void;
+  /** The photo it holds (or will show once captured). */
+  readonly image:Texture;
 }
 /** Passive UIKit views for the palette and the labels attached to placed markers. */
 @component
@@ -480,17 +476,15 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const t=this.textRow(col,label,14.6,1.8,"Body");
     t.textFill.color=this.accent;
   }
-  /** The Note asset's entire interface — a step-by-step wizard (shot #, shot type, movement) mounted
-   * the same way the Camera/Light control panels are: on the operator-facing side (backAxis-2 style,
-   * baked into ScoutNoteWizard itself), anchored near the top of the waypoint pin so it's readable at
-   * eye level the instant the pin is placed. `scheduleDelay` hands the wizard this component's own
-   * createEvent access, since ScoutNoteWizard is a plain class, not a component. */
-  buildNoteWizard(root:SceneObject,label:string,labelY:number,state:NoteAssetState,onChange:(patch:Partial<NoteAssetState>)=>void,onEdit:()=>void,onDelete:()=>void,photo=false):void {
-    if(!this.badgeMaterial)return;
-    const theme:NoteWizardTheme={font:THEME_FONT,textColor:NOTE_TEXT_TINT,accent:NOTE_ACCENT_TINT,idleColor:NOTE_IDLE_TINT,hoverColor:NOTE_HOVER_TINT,activeColor:NOTE_ACTIVE_TINT,panelColor:NOTE_PAPER_TINT};
-    new ScoutNoteWizard(root,new vec3(0,labelY,0),this.badgeMaterial,theme,label,state,onChange,onEdit,onDelete,(seconds,fn)=>{
+  /** The Note asset's whole interface: a lavender field-journal card (ScoutNoteWizard) standing on its
+   * pointer, whose tip is at `tipY` above the note's spot. `reference` finds the nearest camera's
+   * reference photo. `scheduleDelay` hands the card this component's createEvent access. */
+  buildNoteWizard(root:SceneObject,label:string,tipY:number,state:NoteAssetState,onChange:(patch:Partial<NoteAssetState>)=>void,onEdit:()=>void,onDelete:()=>void,photo=false,reference:()=>NoteReference|null=()=>null):ScoutNoteWizard {
+    if(!this.badgeMaterial)return null;
+    const theme:NoteWizardTheme={font:THEME_FONT};
+    return new ScoutNoteWizard(root,new vec3(0,tipY,0),this.badgeMaterial,theme,label,state,onChange,onEdit,onDelete,(seconds,fn)=>{
       const ev=this.createEvent("DelayedCallbackEvent");ev.bind(fn);ev.reset(seconds);
-    },photo);
+    },photo,reference);
   }
   /** Compact ISO/Aperture/Shutter/WB dial row for one placed Camera asset — purely informational, no
    * dial here drives a real effect (see AGENTS request: only the Light asset's dials do). */
@@ -591,6 +585,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       },
       setStatus:(text:string)=>{title.text=text;},
       setImage:(tex:Texture)=>{image=tex;},
+      get image(){return image;},
     };
     view.setState("empty");
     return view;

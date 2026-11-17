@@ -3,7 +3,8 @@ import {ScoutSharedSession} from "./ScoutSharedSession";
 import {parseLayout,ScoutLayout,MarkerRecord} from "./ScoutLayout";
 import {ScoutPaletteUI} from "./ScoutPaletteUI";
 import {PosableDummy,DummyPose,DUMMY_PART_COUNT,SEATED_POSE} from "./ScoutPosableDummy";
-import {buildMarkerMesh, NOTE_PIN_HEIGHT} from "./ScoutMarkerMesh";
+import {buildMarkerMesh, buildNoteGhost, NOTE_PIN_HEIGHT, NOTE_TIP_HEIGHT} from "./ScoutMarkerMesh";
+import type {ScoutNoteWizard, NoteReference} from "./ScoutNoteWizard";
 import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {InteractableManipulation} from "InteractionKit.lspkg/Components/Interaction/InteractableManipulation/InteractableManipulation";
 import {InteractionManager} from "InteractionKit.lspkg/Core/InteractionManager/InteractionManager";
@@ -416,9 +417,8 @@ export class ScoutMain extends BaseScriptComponent {
       const visual=findMeshVisual(this.previewShape);
       if(visual)this.previewShape.getTransform().setLocalPosition(new vec3(0,this.placementPreview.getTransform().getWorldPosition().y-visual.worldAabbMin().y,0));
     }else if(this.selected===2){
-      // The Note's pin+notepad is too tall/wide to usefully preview while just aiming — the pulsing
-      // ground indicator (built once, shared by every asset type) is enough to show where it'll land.
-      this.previewShape=null;
+      // A miniature of the note's card on its pointer, the same cursor size as the other tools' ghosts.
+      this.previewShape=buildNoteGhost(this.placementPreview,this.markerMaterial);
     }else this.previewShape=buildMarkerMesh(this.placementPreview,this.selected,this.markerMaterial,true);
   }
   /** Flat glowing grid decal on the real floor, showing where the selected asset will land. */
@@ -439,6 +439,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.followPalette();
     this.updateHeightSliders();
     this.updateDummies();
+    this.updateNotes();
     const all=InteractionManager.getInstance().getInteractorsByType(InteractorInputType.All);
     all.forEach(interactor=>{
       if(this.interactors.indexOf(interactor)>=0)return;
@@ -998,6 +999,20 @@ export class ScoutMain extends BaseScriptComponent {
     }
     return this.tiltWheelMaterial;
   }
+  /** Every placed Note's card, refreshed so a camera's new reference photo shows up on nearby notes. */
+  private noteWizards:ScoutNoteWizard[]=[];
+  private updateNotes():void {
+    this.noteWizards=this.noteWizards.filter(w=>!isNull(w.root));
+    for(const w of this.noteWizards)w.refresh();
+  }
+  /** The reference frame a Note shows: the nearest camera's captured angle. */
+  private noteReference(note:SceneObject):NoteReference|null {
+    if(isNull(note))return null;
+    const rec=this.angleCapture.nearest(note.getTransform().getWorldPosition());
+    if(!rec)return null;
+    const state=this.angleCapture.isGuiding(rec)?"guiding":rec.captured?(rec.stale?"stale":"captured"):"empty";
+    return {camera:rec.root.name,state,texture:rec.screen.image,capture:()=>{this.lastAction=getTime();this.tips.done("capture");this.angleCapture.start(rec);}};
+  }
   /** A dummy's limbs are grabbable (and its joints show) only while it's in edit mode. */
   private updateDummies():void {
     for(const [root,dummy] of this.dummies){
@@ -1114,9 +1129,10 @@ export class ScoutMain extends BaseScriptComponent {
     }
     // Note's pin rises from the floor to eye level, so its interactive content anchors near the top of
     // the pin rather than just above a ground-level card, like every other asset's label/dial row does.
-    const labelY=kind===2?NOTE_PIN_HEIGHT:height/2+8;
+    const labelY=kind===2?NOTE_TIP_HEIGHT:height/2+8;
     if(noteState){
-      this.palette.buildNoteWizard(root,label,labelY,noteState,patch=>Object.assign(noteState,patch),()=>this.editMarker(root),()=>this.deleteMarker(root),this.shootType==="photo");
+      const wizard=this.palette.buildNoteWizard(root,label,labelY,noteState,patch=>Object.assign(noteState,patch),()=>this.editMarker(root),()=>this.deleteMarker(root),this.shootType==="photo",()=>this.noteReference(root));
+      if(wizard)this.noteWizards.push(wizard);
     }else{
       this.palette.decorateMarker(root,label,labelY,()=>this.editMarker(root),()=>this.deleteMarker(root),kind===0?1:kind===1?2:0);
     }

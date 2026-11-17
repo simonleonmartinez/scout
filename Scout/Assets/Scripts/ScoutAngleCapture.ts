@@ -34,6 +34,8 @@ export class ScoutAngleCapture {
 
   constructor(private material:Material,private camera:Camera,private floorY:()=>number,private schedule:(seconds:number,fn:()=>void)=>void){}
 
+  /** True while walking the user to this particular camera. */
+  isGuiding(rec:AngleCameraRecord):boolean {return this.active===rec;}
   /** True while walking the user to a camera — placement pinches should be ignored meanwhile. */
   get guiding():boolean {return !!this.active;}
 
@@ -41,6 +43,16 @@ export class ScoutAngleCapture {
     const rec:AngleCameraRecord={root,screen,photo,captured:null,stale:false};
     this.cameras.push(rec);
     return rec;
+  }
+  /** The camera nearest `point` (world), or null if none are placed — what a Note shows as its reference. */
+  nearest(point:vec3):AngleCameraRecord|null {
+    let best:AngleCameraRecord=null,bestD=Infinity;
+    for(const r of this.cameras){
+      if(isNull(r.root))continue;
+      const d=r.root.getTransform().getWorldPosition().distance(point);
+      if(d<bestD){bestD=d;best=r;}
+    }
+    return best;
   }
   start(rec:AngleCameraRecord):void {
     if(this.active)this.cancel();

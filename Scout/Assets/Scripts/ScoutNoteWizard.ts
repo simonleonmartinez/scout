@@ -1,111 +1,104 @@
 import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {addBackPlateHover} from "./ScoutHover";
 import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
+import {RoundedRectangle} from "UIKit.lspkg/Scripts/Visuals/RoundedRectangle/RoundedRectangle";
 import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
-import {addBox} from "./ScoutMarkerMesh";
-import {NoteAssetState, SHOT_TYPE_STEPS, MOVEMENT_STEPS, PHOTO_SHOT_TYPE_STEPS, PHOTO_ANGLE_STEPS} from "./ScoutAssetState";
+import {NoteAssetState,SHOT_TYPE_STEPS,MOVEMENT_STEPS,PHOTO_SHOT_TYPE_STEPS,PHOTO_ANGLE_STEPS,SCENE_PLACES,TIME_OF_DAY,NOTE_TEXT_MAX} from "./ScoutAssetState";
 
 const TRASH_ICON=requireAsset("../Icons/delete.png") as Texture;
 const EDIT_ICON=requireAsset("../Icons/edit.png") as Texture;
 const ARROW_ICON=requireAsset("../Icons/arrow_forward.png") as Texture;
+const MOVIE_ICON=requireAsset("../Icons/movie.png") as Texture;
+const PHOTO_ICON=requireAsset("../Icons/photo_camera.png") as Texture;
+const NOTES_ICON=requireAsset("../Icons/edit_note.png") as Texture;
+const VIDEOCAM_ICON=requireAsset("../Icons/videocam.png") as Texture;
+const CHEVRON_ICON=ARROW_ICON;
+const SERIF=requireAsset("../Fonts/DM Serif Display.ttf") as Font;
+const HAND=requireAsset("../Fonts/Edu NSW ACT Foundation.ttf") as Font;
 
-export type NoteWizardTheme={
-  font:Font;
-  textColor:vec4;
-  accent:vec4;
-  idleColor:vec4;
-  hoverColor:vec4;
-  activeColor:vec4;
-  panelColor:vec4;
+export type NoteWizardTheme={font:Font};
+
+/** The reference photo a Note borrows from the nearest Camera's "capture this angle" monitor. */
+export type NoteReference={
+  /** The camera's label, e.g. "Camera 01". */
+  camera:string;
+  state:"empty"|"guiding"|"captured"|"stale";
+  /** The photo, once captured. */
+  texture:Texture|null;
+  /** Starts (or retakes) the capture on that camera. */
+  capture:()=>void;
 };
 
-// Sized to sit alongside the Camera/Light props rather than dwarf them — roughly the Camera's own
-// footprint width, with the whole pin+card assembly (see NOTE_PIN_HEIGHT in ScoutMarkerMesh) topping
-// out at about the Camera's own height. Font sizes below are deliberately NOT scaled down by the same
-// amount as the panel — they stay large and a little oversized for their cells (Overflow intentionally
-// lets them spill slightly), since that big chunky lettering was the one thing worth keeping.
-const PANEL_W=80,PANEL_H=90;
-const HEADER_H=28;
-// Back badge: diameter, and its height in step-content space — its top sits ~4.5cm below the header
-// band, level with the step title's left end.
-const BACK_SIZE=8,BACK_Y=26;
-// Notepad-only decoration colors, kept out of NoteWizardTheme since nothing else in the project uses
-// a paper look — lavender/grey family throughout, no blue or cyan anywhere in this asset.
-const HEADER_BAND=new vec4(0.74,0.70,0.82,1);
-const RULE_LINE=new vec4(0.79,0.76,0.86,1);
-const SPIRAL_RING=new vec4(0.52,0.49,0.58,1);
+// Palette: the lavender field-journal identity.
+const PAPER=rgb(0xE9E0F5),PAPER_2=rgb(0xF4EFF9),PURPLE=rgb(0x7656B5),INK=rgb(0x393047),ACCENT=rgb(0xAA91D5);
+const INK_SOFT=mix(INK,PAPER,0.38),SHEET=mix(PAPER,ACCENT,0.28),RULE=mix(PAPER,ACCENT,0.55);
+const READY=new vec4(0.84,0.93,0.84,1),READY_DOT=new vec4(0.30,0.66,0.38,1),DRAFT=mix(PAPER_2,ACCENT,0.3);
+const FILM=mix(INK,PURPLE,0.25),WHITE=new vec4(1,1,1,1);
 
-/** The Note asset's entire interface: a step-by-step notepad (shot #, shot type, movement) with a
- * spiral-bound top edge and ruled lines, so it reads as a physical notepad rather than a UI panel.
- * Mounted like the Camera/Light control panels — on the marker's operator-facing side — so it's usable
- * the instant it's placed. `scheduleDelay` is injected rather than self-created: this is a plain class,
- * not a component, so it borrows the caller's (a real BaseScriptComponent's) createEvent access for the
- * one timed callback. */
+// Layout, in design centimetres; the whole card is drawn at CARD_SCALE so it sits at about the Camera
+// prop's size. Every section is positioned from the card's top edge down.
+const CARD_SCALE=0.8;
+const W=84,PAD=5,INNER=W-PAD*2;
+const RADIUS=4.5;
+// The pointer: a short, wide, smoothly tapered tail under the card's bottom centre, pointing at the
+// note's spot on the floor.
+const POINTER_H=13,POINTER_W=24;
+// Text sizes (Lens Text points).
+const T_TITLE=520,T_STEP=290,T_VALUE=175,T_BODY=150,T_LABEL=100,T_HAND=205;
+
+/** A Note: a floating lavender field-journal card on a short speech-bubble pointer. It walks through a
+ * few quick picks (Shot #, framing, movement or angle, scene setup), then shows the finished page: scene
+ * title and setup, shot details, the director's handwritten notes (typed with the Specs keyboard), and a
+ * reference frame borrowed from the nearest camera. `scheduleDelay` is injected because this is a plain
+ * class that borrows a component's createEvent. */
 export class ScoutNoteWizard {
   readonly root:SceneObject;
+  private card:SceneObject;
   private contentHost:SceneObject;
-  constructor(parent:SceneObject,pos:vec3,private material:Material,private theme:NoteWizardTheme,label:string,private state:NoteAssetState,private onChange:(patch:Partial<NoteAssetState>)=>void,onEdit:()=>void,onDelete:()=>void,private scheduleDelay:(seconds:number,fn:()=>void)=>void,private photo=false){
+  private refKey="";
+  private notesText:Text=null;
+  constructor(parent:SceneObject,pos:vec3,private material:Material,private theme:NoteWizardTheme,private label:string,private state:NoteAssetState,private onChange:(patch:Partial<NoteAssetState>)=>void,private onEdit:()=>void,private onDelete:()=>void,private scheduleDelay:(seconds:number,fn:()=>void)=>void,private photo=false,private reference:()=>NoteReference|null=()=>null){
+    // `pos` is where the pointer's tip goes; the card stands on top of its pointer.
     this.root=this.obj(parent,"Note wizard",new vec3(pos.x,pos.y,4));
+    this.root.getTransform().setLocalScale(vec3.one().uniformScale(CARD_SCALE));
     this.root.createComponent("Component.Canvas");
-    const back=this.root.createComponent(BackPlate.getTypeName()) as BackPlate;
-    back.style="simple";
-    back.size=new vec2(PANEL_W,PANEL_H);
-    back.onInitialized.add(()=>{
-      this.style(back,theme.panelColor,4);
-      back.interactable.enabled=false;
-      back.interactionPlane.enabled=false;
-    });
-    this.buildNotepadDressing();
-    this.text(this.root,label,new vec3(0,PANEL_H/2-HEADER_H/2,0.3),PANEL_W-24,HEADER_H-6,theme.textColor,105);
-    this.iconBadge(this.root,"DeleteBadge",new vec3(PANEL_W/2-6,PANEL_H/2-HEADER_H/2,0.4),TRASH_ICON,theme.activeColor,onDelete);
-    this.iconBadge(this.root,"EditBadge",new vec3(PANEL_W/2-15,PANEL_H/2-HEADER_H/2,0.4),EDIT_ICON,theme.accent,onEdit);
-    this.contentHost=this.obj(this.root,"WizardContent",new vec3(0,-HEADER_H/2-3.5,0.3));
+    this.card=this.obj(this.root,"Card",new vec3(0,POINTER_H,0));
     this.rebuild();
   }
-  /** Purely decorative: a darker "cardboard backing" band across the top with a row of spiral-binding
-   * rings punched through it, plus a few ruled lines further down — the cues that read as "notepad"
-   * rather than "gear control panel" (which is what the Camera/Light dial panels intentionally look
-   * like instead). All flat, unlit-material shapes layered just in front of the paper background. */
-  private buildNotepadDressing():void {
-    const band=this.obj(this.root,"HeaderBand",new vec3(0,PANEL_H/2-HEADER_H/2,0.12));
-    this.flatRect(band,PANEL_W,HEADER_H,HEADER_BAND);
-    const ringCount=9,ringSpan=PANEL_W-12;
-    for(let i=0;i<ringCount;i++){
-      const x=-ringSpan/2+ringSpan*(i/(ringCount-1));
-      const ring=this.obj(this.root,"SpiralRing"+i,new vec3(x,PANEL_H/2,0.18));
-      this.flatCircle(ring,1.4,SPIRAL_RING);
-    }
-    // Confined to a narrow strip right under the header, above where any step's title ever renders
-    // (root-space y stays <= ~8.5 across every step) — otherwise a line drawn behind a bare title (no
-    // opaque backing, unlike the buttons/cells) visually slices straight through the text.
-    const ruleCount=2,top=PANEL_H/2-HEADER_H-2,bottom=PANEL_H/2-HEADER_H-7;
-    for(let i=0;i<ruleCount;i++){
-      const y=top-(top-bottom)*(i/(ruleCount-1));
-      const rule=this.obj(this.root,"RuleLine"+i,new vec3(0,y,0.12));
-      this.flatRect(rule,PANEL_W-10,0.35,RULE_LINE);
-    }
+
+  /** Call every frame or so: redraws the reference frame when the nearby camera's photo changes. */
+  refresh():void {
+    if(isNull(this.root)||this.state.step!==4)return;
+    const r=this.reference();
+    const key=r?r.camera+"|"+r.state:"none";
+    if(key!==this.refKey)this.rebuild();
   }
+
   private rebuild():void {
-    for(let i=this.contentHost.getChildrenCount()-1;i>=0;i--)this.contentHost.getChild(i).destroy();
-    // Photo shoots: no shot number (no running order), photo shot types, and camera angle instead of
-    // camera movement.
+    for(let i=this.card.getChildrenCount()-1;i>=0;i--)this.card.getChild(i).destroy();
+    this.notesText=null;
+    // The paper is created first so it draws first: text doesn't write depth, so a page drawn after it
+    // would paint over it. Its height is only known once the content is laid out, so it's filled last.
+    const paperHost=this.obj(this.card,"Paper",vec3.zero());
     const shotTypes=this.photo?PHOTO_SHOT_TYPE_STEPS:SHOT_TYPE_STEPS;
-    if(this.state.step===0)this.buildStepWrite();
-    else if(this.state.step===1&&!this.photo)this.buildStepNumberGrid();
-    else if(this.state.step<=2)this.buildStepChoices("Shot Type",shotTypes,i=>this.commit({shotType:i,step:3}));
-    else if(this.state.step===3)this.buildStepChoices(this.photo?"Angle":"Movement",this.photo?PHOTO_ANGLE_STEPS:MOVEMENT_STEPS,i=>this.commit({movementType:i,step:4}));
-    else this.buildSummary();
-    if(this.state.step>=1&&this.state.step<=3)this.buildBackButton();
-    // Step content is rebuilt from scratch on every transition, so the defensive collider sweep (stray
-    // BackPlate colliders would otherwise sit in front of a button and block it) must re-run each time
-    // too, not just once at construction like the static Camera/Light panels.
+    const step=this.state.step;
+    let h:number;
+    if(step===0)h=this.buildStepWrite();
+    else if(step===1&&!this.photo)h=this.buildStepNumbers();
+    else if(step<=2)h=this.buildStepChoices(this.photo?"Framing":"Framing",shotTypes,i=>this.commit({shotType:i,step:3}));
+    else if(step===3)h=this.buildStepChoices(this.photo?"Angle":"Movement",this.photo?PHOTO_ANGLE_STEPS:MOVEMENT_STEPS,i=>this.commit({movementType:i,step:5}));
+    else if(step===5)h=this.buildStepScene();
+    else h=this.buildSummary();
+    this.buildPaper(paperHost,h);
+    // Step content is rebuilt from scratch, so the defensive collider sweep (stray colliders sitting in
+    // front of a button would block it) re-runs each time.
     this.scheduleDelay(0.1,()=>{
       const visit=(node:SceneObject)=>{
-        if(isNull(node))return; // Clear/recover may destroy the note before this delayed sweep.
+        if(isNull(node))return;
         if(node.getComponent(Interactable.getTypeName()))return;
         node.getComponents("Physics.ColliderComponent").forEach(c=>c.enabled=false);
         for(let i=0;i<node.getChildrenCount();i++)visit(node.getChild(i));
-      };visit(this.contentHost);
+      };visit(this.card);
     });
   }
   private commit(patch:Partial<NoteAssetState>):void {
@@ -113,183 +106,337 @@ export class ScoutNoteWizard {
     this.onChange(patch);
     this.rebuild();
   }
-  /** Step 0: nothing but a single "Write note?" button. */
-  private buildStepWrite():void {
-    const btn=this.obj(this.contentHost,"Write note button",new vec3(0,4,0));
-    const back=btn.createComponent(BackPlate.getTypeName()) as BackPlate;
-    back.style="simple";
-    back.size=new vec2(PANEL_W-20,28);
-    back.onInitialized.add(()=>{
-      this.style(back,this.theme.idleColor,3);
-      back.interactionPlane.enabled=false;
-      back.interactable.onTriggerEnd.add(()=>this.commit({step:this.firstStep()}));
-      addBackPlateHover(back,btn,this.theme.idleColor);
-    });
-    this.text(btn,"Write note?",new vec3(0,0,0.3),PANEL_W-28,17,this.theme.textColor,124);
+
+  // ─── The paper: back sheets, the page, its border, the pointer and the tab ───────────────────────────
+  /** The card body for content `h` tall, sitting on the pointer; content is laid out from its top. */
+  private buildPaper(host:SceneObject,h:number):void {
+    // Two sheets peeking out behind the page give it a little stacked-paper depth.
+    // The page sits a little behind the content plane (z<0): its backing has some thickness and would
+    // otherwise hide anything laid right on top of it.
+    this.rect(host,"Sheet 2",new vec3(1.6,h/2-1.8,-1.4),W,h,SHEET,RADIUS);
+    this.rect(host,"Sheet 1",new vec3(0.8,h/2-0.9,-1.2),W,h,mix(SHEET,PAPER,0.5),RADIUS);
+    const page=this.rect(host,"Page",new vec3(0,h/2,-1),W,h,PAPER,RADIUS);
+    page.border=true;page.borderSize=0.22;page.borderColor=ACCENT;
+    this.buildPointer(host);
+    // The notebook tab on the top edge, labelled with the note's name.
+    const tab=this.obj(host,"Tab",new vec3(-W/2+17,h+3.2,-1.1));
+    this.rect(tab,"Tab paper",new vec3(0,0,0),26,9.5,mix(PAPER,ACCENT,0.42),2.4);
+    this.icon(tab,this.photo?PHOTO_ICON:MOVIE_ICON,new vec3(-8.5,0.6,0.2),4,INK);
+    this.text(tab,this.label,new vec3(2.5,0.6,0.2),18,6,INK,T_BODY,this.theme.font,HorizontalAlignment.Center);
   }
-  /** Step 1: a grid of shot numbers 1-10 — tap one to pick it and advance immediately, same pattern as
-   * the shot-type/movement grids below (a slider read poorly and was fiddly to grab precisely). */
-  private buildStepNumberGrid():void {
-    this.text(this.contentHost,"Shot #",new vec3(0,30,0.2),PANEL_W-15,9,this.theme.textColor,100);
-    const cols=5,rows=2,total=10;
-    const cellW=(PANEL_W-12)/cols,cellH=22;
-    const gridW=cellW*cols;
-    const topRowY=8,rowSpacing=cellH;
-    for(let n=1;n<=total;n++){
-      const i=n-1,col=i%cols,row=Math.floor(i/cols);
-      const x=-gridW/2+cellW*(col+0.5);
-      const y=topRowY-row*rowSpacing;
-      const cell=this.obj(this.contentHost,"Number"+n,new vec3(x,y,0));
-      const back=cell.createComponent(BackPlate.getTypeName()) as BackPlate;
-      back.style="simple";
-      back.size=new vec2(cellW-1.5,cellH-2);
-      const selected=n===this.state.shotNumber;
-      back.onInitialized.add(()=>{
-        this.style(back,selected?this.theme.activeColor:this.theme.idleColor,2);
-        back.interactionPlane.enabled=false;
-        back.interactable.onTriggerEnd.add(()=>this.commit({shotNumber:n,step:2}));
-        addBackPlateHover(back,cell,selected?this.theme.activeColor:this.theme.idleColor);
-      });
-      this.text(cell,String(n),new vec3(0,0,0.3),cellW-3,cellH-3,this.theme.textColor,90);
+  /** A short, wide, smoothly tapered tail: flush with the card's bottom edge, narrowing to a point. */
+  private buildPointer(parent:SceneObject):void {
+    const so=this.obj(parent,"Pointer",new vec3(0,0,-1.02));
+    const b=this.meshBuilder();
+    const c=[PAPER.x,PAPER.y,PAPER.z,1];
+    const segs=10;
+    // Each side bows inward (a soft concave curve) so the tail tapers smoothly instead of a flat wedge;
+    // the top overlaps the card by a centimetre so the seam is hidden.
+    for(let i=0;i<=segs;i++){
+      const t=i/segs,y=1-t*(POINTER_H+1);
+      const half=(POINTER_W/2)*Math.pow(1-t,1.6);
+      b.appendVerticesInterleaved([-half,y,0,0,0,1,...c]);
+      b.appendVerticesInterleaved([half,y,0,0,0,1,...c]);
     }
+    const ix:number[]=[];
+    for(let i=0;i<segs;i++){const a=i*2;ix.push(a,a+2,a+1,a+1,a+2,a+3,a,a+1,a+2,a+1,a+3,a+2);}
+    b.appendIndices(ix);
+    const v=so.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    v.mesh=b.getMesh();v.mainMaterial=this.material.clone();b.updateMesh();
   }
-  /** Steps 2 & 3: a row of icon choices; tapping one selects it and advances immediately. */
-  private buildStepChoices(title:string,steps:{label:string;icon:Texture}[],onPick:(index:number)=>void):void {
-    this.text(this.contentHost,title,new vec3(0,30,0.2),PANEL_W-15,9,this.theme.textColor,100);
-    const cols=steps.length>4?3:steps.length;
-    const rows=Math.ceil(steps.length/cols);
-    const cellW=(PANEL_W-8)/cols,cellH=25;
-    const gridW=cellW*cols;
-    const topRowY=rows>1?9:1,rowSpacing=cellH;
+
+  // ─── Steps ───────────────────────────────────────────────────────────────────────────────────────────
+  /** Step 0: a fresh page with one action. */
+  private buildStepWrite():number {
+    const h=44;
+    this.caps(this.card,this.photo?"PHOTO LIST":"SHOT LIST",new vec3(0,h-8,0.3),INK_SOFT,HorizontalAlignment.Center);
+    this.text(this.card,"New note",new vec3(0,h-17,0.3),INNER,12,INK,T_STEP,SERIF,HorizontalAlignment.Center);
+    this.pill(this.card,"Start note",new vec3(0,10,0.3),40,10,PURPLE,WHITE,EDIT_ICON,()=>this.commit({step:this.firstStep()}));
+    this.headerActions(h);
+    return h;
+  }
+  /** Step 1 (video): the shot number. */
+  private buildStepNumbers():number {
+    const h=74;
+    this.stepHeader(h,"Shot number","1 OF 4");
+    const cols=5,cellW=INNER/cols,cellH=14;
+    for(let n=1;n<=10;n++){
+      const i=n-1,col=i%cols,row=Math.floor(i/cols);
+      const x=-INNER/2+cellW*(col+0.5),y=h-36-row*(cellH+2);
+      const sel=n===this.state.shotNumber;
+      this.tile(this.card,"Number"+n,new vec3(x,y,0.3),cellW-2,cellH,sel,()=>this.commit({shotNumber:n,step:2}),tile=>{
+        this.text(tile,String(n),new vec3(0,0,0.3),cellW-4,cellH-2,sel?WHITE:INK,T_STEP*0.8,SERIF,HorizontalAlignment.Center);
+      });
+    }
+    this.backButton(h);
+    return h;
+  }
+  /** Framing / movement / angle: icon tiles; tapping one picks it and moves on. */
+  private buildStepChoices(title:string,steps:{label:string;icon:Texture}[],onPick:(index:number)=>void):number {
+    const cols=steps.length>4?3:steps.length,rows=Math.ceil(steps.length/cols);
+    const cellW=INNER/cols,cellH=19;
+    const h=40+rows*(cellH+2.5)+4;
+    const n=this.photo?(this.state.step===2?"1 OF 3":"2 OF 3"):(this.state.step===2?"2 OF 4":"3 OF 4");
+    this.stepHeader(h,title,n);
+    const current=this.state.step===2?this.state.shotType:this.state.movementType;
     steps.forEach((s,i)=>{
       const col=i%cols,row=Math.floor(i/cols);
-      const x=-gridW/2+cellW*(col+0.5);
-      const y=topRowY-row*rowSpacing;
-      const cell=this.obj(this.contentHost,"Choice"+i,new vec3(x,y,0));
-      const back=cell.createComponent(BackPlate.getTypeName()) as BackPlate;
-      back.style="simple";
-      back.size=new vec2(cellW-3,cellH-2);
-      back.onInitialized.add(()=>{
-        this.style(back,this.theme.idleColor,2);
-        back.interactionPlane.enabled=false;
-        back.interactable.onTriggerEnd.add(()=>onPick(i));
-        addBackPlateHover(back,cell,this.theme.idleColor);
+      const x=-INNER/2+cellW*(col+0.5),y=h-38-row*(cellH+2.5);
+      const sel=i===current;
+      this.tile(this.card,"Choice"+i,new vec3(x,y,0.3),cellW-2.5,cellH,sel,()=>onPick(i),tile=>{
+        this.icon(tile,s.icon,new vec3(0,3.2,0.3),6,sel?WHITE:INK);
+        this.text(tile,s.label,new vec3(0,-4.8,0.3),cellW-4,5,sel?WHITE:INK,T_LABEL+10,this.theme.font,HorizontalAlignment.Center);
       });
-      const iconHost=this.obj(cell,"Icon",new vec3(0,4,0.3));
-      const img=iconHost.createComponent("Component.Image") as Image;
-      img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
-      img.mainPass.baseTex=s.icon;img.mainPass.baseColor=this.theme.textColor;
-      iconHost.getTransform().setLocalScale(new vec3(4,4,1));
-      this.text(cell,s.label,new vec3(0,-7,0.3),cellW-4,6,this.theme.textColor,72);
     });
+    this.backButton(h);
+    return h;
   }
-  /** After the last step: a compact read-only summary, matching how every other asset ends up with a
-   * static label once its settings are set. */
-  private buildSummary():void {
+  /** Step 5: scene setup — interior or exterior, and the time of day. */
+  private buildStepScene():number {
+    const h=82;
+    this.stepHeader(h,"Scene setup",this.photo?"3 OF 3":"4 OF 4");
+    this.caps(this.card,"LOCATION",new vec3(-INNER/2,h-33,0.3),INK_SOFT);
+    const placeW=(INNER-3)/2;
+    SCENE_PLACES.forEach((p,i)=>{
+      const sel=this.state.interior===i;
+      this.tile(this.card,"Place"+i,new vec3(-INNER/2+placeW/2+i*(placeW+3),h-41,0.3),placeW,9,sel,()=>this.commit({interior:sel?null:i}),tile=>{
+        this.text(tile,p,new vec3(0,0,0.3),placeW-2,7,sel?WHITE:INK,T_VALUE,this.theme.font,HorizontalAlignment.Center);
+      });
+    });
+    this.caps(this.card,"TIME OF DAY",new vec3(-INNER/2,h-51,0.3),INK_SOFT);
+    const todW=(INNER-6)/3;
+    TIME_OF_DAY.forEach((t,i)=>{
+      const sel=this.state.timeOfDay===i;
+      this.tile(this.card,"Time"+i,new vec3(-INNER/2+todW/2+i*(todW+3),h-59,0.3),todW,9,sel,()=>this.commit({timeOfDay:sel?null:i}),tile=>{
+        this.text(tile,t,new vec3(0,0,0.3),todW-2,7,sel?WHITE:INK,T_LABEL+12,this.theme.font,HorizontalAlignment.Center);
+      });
+    });
+    this.pill(this.card,"Done",new vec3(W/2-PAD-13,9,0.3),26,9,PURPLE,WHITE,null,()=>this.commit({step:4}));
+    this.backButton(h);
+    return h;
+  }
+
+  // ─── The finished page ───────────────────────────────────────────────────────────────────────────────
+  private buildSummary():number {
     const types=this.photo?PHOTO_SHOT_TYPE_STEPS:SHOT_TYPE_STEPS,moves=this.photo?PHOTO_ANGLE_STEPS:MOVEMENT_STEPS;
-    const type=this.state.shotType!==null?types[this.state.shotType]?.label??"?":"?";
-    const move=this.state.movementType!==null?moves[this.state.movementType]?.label??"?":"?";
-    if(this.photo){
-      // No shot number on a photo shoot — the shot type leads instead.
-      this.text(this.contentHost,type,new vec3(0,17,0.2),PANEL_W-15,18,this.theme.accent,130);
-      this.text(this.contentHost,move,new vec3(0,0,0.2),PANEL_W-15,11,this.theme.textColor,92);
-    }else{
-      this.text(this.contentHost,"Shot "+this.state.shotNumber,new vec3(0,17,0.2),PANEL_W-15,18,this.theme.accent,145);
-      this.text(this.contentHost,type+" · "+move,new vec3(0,0,0.2),PANEL_W-15,11,this.theme.textColor,92);
-    }
-    const redo=this.obj(this.contentHost,"Redo",new vec3(0,-19,0.1));
-    const back=redo.createComponent(BackPlate.getTypeName()) as BackPlate;
-    back.style="simple";back.size=new vec2(30,12);
-    back.onInitialized.add(()=>{
-      this.style(back,this.theme.idleColor,2);
-      back.interactionPlane.enabled=false;
-      back.interactable.onTriggerEnd.add(()=>this.commit({step:this.firstStep()}));
-      addBackPlateHover(back,redo,this.theme.idleColor);
-    });
-    this.text(redo,"Edit",new vec3(0,0,0.3),26,8,this.theme.textColor,72);
+    const type=this.state.shotType!==null?types[this.state.shotType]:null;
+    const move=this.state.movementType!==null?moves[this.state.movementType]:null;
+    const h=124;
+    const top=h;
+    const L=-INNER/2;
+    // Header: production line, the scene title, its setup line.
+    this.caps(this.card,this.photo?"PHOTO SHOOT":"PRODUCTION",new vec3(L,top-7,0.3),INK_SOFT);
+    const title=this.photo?(type?.label??"Photo"):"Shot "+pad2(this.state.shotNumber);
+    this.fit(this.text(this.card,title,new vec3(L+28,top-16.5,0.3),56,13,INK,T_TITLE,SERIF,HorizontalAlignment.Left));
+    const setup=[this.state.interior!=null?SCENE_PLACES[this.state.interior]:null,this.state.timeOfDay!=null?TIME_OF_DAY[this.state.timeOfDay]:null].filter(x=>!!x);
+    this.caps(this.card,setup.length?setup.join("  •  "):"SCENE SETUP NOT SET",new vec3(L,top-25.5,0.3),setup.length?INK:INK_SOFT);
+    this.headerActions(h);
+    this.rule(this.card,top-30);
+    // Shot details: two scannable cards, with the page's status.
+    this.icon(this.card,VIDEOCAM_ICON,new vec3(L+2,top-35.5,0.3),3.6,INK);
+    this.caps(this.card,"SHOT DETAILS",new vec3(L+5.5,top-35.5,0.3),INK);
+    const ready=!!type&&!!move;
+    const pill=this.obj(this.card,"Status",new vec3(W/2-PAD-9,top-35.5,0.3));
+    this.rect(pill,"Status bg",vec3.zero(),18,6.2,ready?READY:DRAFT,3.1);
+    this.dot(pill,new vec3(-5.6,0,0.2),0.9,ready?READY_DOT:ACCENT);
+    this.text(pill,ready?"Ready":"Draft",new vec3(1.6,0,0.2),12,5,INK,T_BODY-4,this.theme.font,HorizontalAlignment.Center);
+    const cardW=(INNER-3)/2;
+    this.detail(this.card,new vec3(L+cardW/2,top-46,0.2),cardW,"FRAMING",type?.label??"—",type?.icon??null);
+    this.detail(this.card,new vec3(L+cardW*1.5+3,top-46,0.2),cardW,this.photo?"ANGLE":"MOVEMENT",move?.label??"—",move?.icon??null);
+    // Director's notes: a ruled writing area; tap it to type.
+    this.icon(this.card,NOTES_ICON,new vec3(L+2,top-57.5,0.3),3.8,INK);
+    this.caps(this.card,"DIRECTOR'S NOTES",new vec3(L+5.5,top-57.5,0.3),INK);
+    this.notesArea(new vec3(0,top-69.5,0.2),INNER,19);
+    // Reference frame from the nearest camera.
+    this.referenceArea(new vec3(0,top-94,0.2),INNER,22);
+    // Footer: page number and the primary action.
+    this.rule(this.card,top-108.5);
+    this.caps(this.card,"FIELD JOURNAL  •  PAGE "+pad2(pageOf(this.label)),new vec3(L,top-116,0.3),INK_SOFT);
+    this.pill(this.card,"Edit Note",new vec3(W/2-PAD-14,top-116,0.3),28,8.5,PURPLE,WHITE,EDIT_ICON,()=>this.commit({step:this.firstStep()}));
+    return h;
   }
-  /** Top-left "Back" on every question step, for a change of mind or a mis-tap. Steps back one question;
-   * from the first question it returns to the finished note if this was an edit, else to "Write note?". */
-  private buildBackButton():void {
+  /** One shot-detail card: a small caps label over the value, with its icon. */
+  private detail(parent:SceneObject,pos:vec3,w:number,label:string,value:string,icon:Texture|null):void {
+    const so=this.obj(parent,label,pos);
+    this.rect(so,"bg",vec3.zero(),w,13,PAPER_2,2.4);
+    if(icon)this.icon(so,icon,new vec3(-w/2+5,0,0.2),5,INK);
+    this.caps(so,label,new vec3(-w/2+9.5,2.6,0.2),INK_SOFT);
+    this.text(so,value,new vec3(-w/2+9.5+(w-12)/2,-2.4,0.2),w-12,6,INK,T_VALUE,this.theme.font,HorizontalAlignment.Left);
+  }
+  /** The director's notes, in a handwriting font on faint rules. Tapping opens the Specs keyboard. */
+  private notesArea(pos:vec3,w:number,h:number):void {
+    const so=this.obj(this.card,"Director's notes",pos);
+    const back=this.button(so,w,h,PAPER_2,3,()=>this.openKeyboard());
+    for(let i=0;i<2;i++)this.bar(so,new vec3(0,h/2-7.5-i*6,0.15),w-8,0.18,RULE);
+    const has=!!this.state.notes&&this.state.notes.trim().length>0;
+    this.notesText=this.text(so,has?this.state.notes:"Tap to write a note…",new vec3(0,0,0.3),w-8,h-4,has?INK:INK_SOFT,T_HAND,HAND,HorizontalAlignment.Left);
+    this.notesText.horizontalOverflow=HorizontalOverflow.Wrap;
+    this.notesText.verticalOverflow=VerticalOverflow.Shrink;
+    this.notesText.verticalAlignment=VerticalAlignment.Top;
+    void back;
+  }
+  private openKeyboard():void {
+    try{
+      require("LensStudio:TextInputModule");
+      const options=new TextInputSystem.KeyboardOptions();
+      options.enablePreview=true;
+      options.keyboardType=TextInputSystem.KeyboardType.Text;
+      options.returnKeyType=TextInputSystem.ReturnKeyType.Done;
+      options.initialText=this.state.notes??"";
+      options.onTextChanged=(text:string)=>{
+        const t=text.slice(0,NOTE_TEXT_MAX);
+        this.state.notes=t;this.onChange({notes:t});
+        if(this.notesText&&!isNull(this.notesText)){
+          this.notesText.text=t.trim()?t:"Tap to write a note…";
+          this.notesText.textFill.color=t.trim()?INK:INK_SOFT;
+        }
+      };
+      options.onReturnKeyPressed=()=>global.textInputSystem.dismissKeyboard();
+      options.onError=(_c:number,d:string)=>console.warn("Scout note keyboard: "+d);
+      global.textInputSystem.requestKeyboard(options);
+    }catch(e){console.warn("Scout note keyboard unavailable: "+e);}
+  }
+  /** The nearest camera's reference photo on a strip of film, with an action to capture or retake it. */
+  private referenceArea(pos:vec3,w:number,h:number):void {
+    const r=this.reference();
+    this.refKey=r?r.camera+"|"+r.state:"none";
+    const so=this.obj(this.card,"Reference frame",pos);
+    this.rect(so,"bg",vec3.zero(),w,h,PAPER_2,3);
+    // Film strip: a dark band with perforations above and below the frame.
+    const fw=30,fx=-w/2+fw/2+2;
+    const film=this.obj(so,"Film",new vec3(fx,0,0.15));
+    this.rect(film,"strip",vec3.zero(),fw,h-3,FILM,1.2);
+    for(let i=0;i<6;i++)for(const sy of [-1,1])this.rect(film,"perf",new vec3(-fw/2+3+i*4.8,sy*(h/2-3.2),0.1),2,1.3,mix(FILM,PAPER,0.55),0.4);
+    const photo=r&&r.texture&&(r.state==="captured"||r.state==="stale");
+    const imgW=fw-4,imgH=h-10;
+    if(photo){
+      const img=this.icon(film,r.texture,new vec3(0,0,0.2),1,WHITE);
+      img.getTransform().setLocalScale(new vec3(imgW,imgH,1));
+    }else{
+      this.rect(film,"empty",new vec3(0,0,0.15),imgW,imgH,mix(FILM,PAPER,0.2),0.6);
+      this.icon(film,PHOTO_ICON,new vec3(0,0,0.25),5,mix(FILM,PAPER,0.6));
+    }
+    const tx=fx+fw/2+4,tw=w-fw-19;
+    this.caps(so,"REFERENCE FRAME",new vec3(tx,5.2,0.2),INK_SOFT);
+    const titleT=!r?"No camera yet":photo?r.camera+" angle":"No reference yet";
+    const sub=!r?"Place a camera to take one":r.state==="stale"?"Angle changed · retake":photo?(this.photo?"Captured · 3:2":"Captured · 16:9"):r.state==="guiding"?"Walk to the camera…":"Capture from "+r.camera;
+    this.fit(this.text(so,titleT,new vec3(tx+tw/2,0,0.2),tw,6,INK,T_VALUE,SERIF,HorizontalAlignment.Left));
+    this.fit(this.text(so,sub,new vec3(tx+tw/2,-5,0.2),tw,5,INK_SOFT,T_LABEL+10,this.theme.font,HorizontalAlignment.Left));
+    if(r&&r.state!=="guiding"){
+      const go=this.obj(so,"Capture",new vec3(w/2-7,0,0.2));
+      this.button(go,8.5,8.5,PAPER,4.25,()=>r.capture());
+      this.icon(go,CHEVRON_ICON,new vec3(0,0,0.3),5,PURPLE);
+    }
+  }
+
+  // ─── Shared pieces ───────────────────────────────────────────────────────────────────────────────────
+  /** Question-step header: progress caps, the step title in serif, back on the left. */
+  private stepHeader(h:number,title:string,progress:string):void {
+    this.caps(this.card,(this.photo?"NEW PHOTO NOTE":"NEW SHOT NOTE")+"  •  "+progress,new vec3(-INNER/2+11,h-8,0.3),INK_SOFT);
+    this.text(this.card,title,new vec3(-INNER/2+11+30,h-17,0.3),60,12,INK,T_STEP,SERIF,HorizontalAlignment.Left);
+    this.headerActions(h);
+    this.rule(this.card,h-25);
+  }
+  /** Move (edit) and delete, grouped at the top right. */
+  private headerActions(h:number):void {
+    this.round(this.card,"EditBadge",new vec3(W/2-PAD-14,h-11,0.3),EDIT_ICON,PURPLE,this.onEdit);
+    this.round(this.card,"DeleteBadge",new vec3(W/2-PAD-4,h-11,0.3),TRASH_ICON,PURPLE,this.onDelete);
+  }
+  /** Back one question; from the first question, back to the finished page (if any) or a fresh page. */
+  private backButton(h:number):void {
     const step=this.state.step;
     const finished=this.state.shotType!==null&&this.state.movementType!==null;
-    const target=(step>this.firstStep()?(this.photo&&step===3?2:step-1):(finished?4:0)) as NoteAssetState["step"];
-    // A round arrow badge, like the header's Edit/Delete badges, sitting clear of the header band.
-    const btn=this.obj(this.contentHost,"Back",new vec3(-PANEL_W/2+9,BACK_Y,0.1));
-    const back=btn.createComponent(BackPlate.getTypeName()) as BackPlate;
-    back.style="simple";back.size=new vec2(BACK_SIZE,BACK_SIZE);
-    back.onInitialized.add(()=>{
-      this.style(back,this.theme.idleColor,BACK_SIZE/2);
-      back.interactionPlane.enabled=false;
-      back.interactable.onTriggerEnd.add(()=>this.commit({step:target}));
-      addBackPlateHover(back,btn,this.theme.idleColor);
-    });
-    // The forward arrow turned half a turn (a negative scale would flip it to face away and vanish).
-    const iconHost=this.obj(btn,"Icon",new vec3(0,0,0.4));
-    const img=iconHost.createComponent("Component.Image") as Image;
-    img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
-    img.mainPass.baseTex=ARROW_ICON;img.mainPass.baseColor=this.theme.textColor;
-    iconHost.getTransform().setLocalScale(new vec3(BACK_SIZE*0.6,BACK_SIZE*0.6,1));
-    iconHost.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.forward()));
+    const target=(step===5?3:step>this.firstStep()?(this.photo&&step===3?2:step-1):(finished?4:0)) as NoteAssetState["step"];
+    const so=this.obj(this.card,"Back",new vec3(-INNER/2+4,h-12.5,0.3));
+    this.button(so,8,8,PAPER_2,4,()=>this.commit({step:target}));
+    const ic=this.icon(so,ARROW_ICON,new vec3(0,0,0.3),4.6,INK);
+    ic.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.forward()));
   }
-  /** Where "Write note?" / "Edit" start: the shot number on a video shoot, the shot type on a photo shoot. */
   private firstStep():1|2 {return this.photo?2:1;}
-  private iconBadge(parent:SceneObject,name:string,pos:vec3,icon:Texture,tint:vec4,onTap:()=>void):void {
+
+  /** A selectable tile: filled purple when selected, light paper otherwise. */
+  private tile(parent:SceneObject,name:string,pos:vec3,w:number,h:number,selected:boolean,onTap:()=>void,fill:(so:SceneObject)=>void):void {
     const so=this.obj(parent,name,pos);
+    this.button(so,w,h,selected?PURPLE:PAPER_2,2.4,onTap);
+    fill(so);
+  }
+  /** A pill button with an optional leading icon. */
+  private pill(parent:SceneObject,label:string,pos:vec3,w:number,h:number,bg:vec4,fg:vec4,icon:Texture|null,onTap:()=>void):void {
+    const so=this.obj(parent,label,pos);
+    this.button(so,w,h,bg,h/2,onTap);
+    if(icon){
+      this.icon(so,icon,new vec3(-w/2+5.5,0,0.3),4,fg);
+      this.text(so,label,new vec3(3,0,0.3),w-10,h-2,fg,T_VALUE,this.theme.font,HorizontalAlignment.Center);
+    }else this.text(so,label,new vec3(0,0,0.3),w-4,h-2,fg,T_VALUE,this.theme.font,HorizontalAlignment.Center);
+  }
+  /** A round icon button. */
+  private round(parent:SceneObject,name:string,pos:vec3,icon:Texture,tint:vec4,onTap:()=>void):void {
+    const so=this.obj(parent,name,pos);
+    this.button(so,8.5,8.5,PAPER_2,4.25,onTap);
+    this.icon(so,icon,new vec3(0,0,0.3),4.8,tint);
+  }
+  /** A tappable rounded rectangle (UIKit BackPlate) with a gentle hover. */
+  private button(so:SceneObject,w:number,h:number,color:vec4,radius:number,onTap:()=>void):BackPlate {
     const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
-    back.style="simple";back.size=new vec2(9,9);
+    back.style="simple";back.size=new vec2(w,h);
     back.onInitialized.add(()=>{
-      this.style(back,this.theme.idleColor,4.5);
+      const rect=(back as unknown as {roundedRectangle:RoundedRectangle}).roundedRectangle;
+      rect.gradient=false;rect.backgroundColor=color;rect.cornerRadius=radius;
       back.interactionPlane.enabled=false;
-      back.interactable.onTriggerEnd.add(onTap);
-      addBackPlateHover(back,so,this.theme.idleColor);
+      back.interactable.onTriggerEnd.add(()=>onTap());
+      addBackPlateHover(back,so,color);
     });
-    const iconHost=this.obj(so,"Icon",new vec3(0,0,0.4));
-    const img=iconHost.createComponent("Component.Image") as Image;
+    return back;
+  }
+  /** A plain (non-interactive) rounded rectangle. */
+  private rect(parent:SceneObject,name:string,pos:vec3,w:number,h:number,color:vec4,radius:number):RoundedRectangle {
+    const so=this.obj(parent,name,pos);
+    const r=so.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle;
+    r.initialize();
+    r.size=new vec2(w,h);r.cornerRadius=radius;r.gradient=false;r.backgroundColor=color;
+    return r;
+  }
+  private rule(parent:SceneObject,y:number):void {this.bar(parent,new vec3(0,y,0.15),INNER,0.22,RULE);}
+  private bar(parent:SceneObject,pos:vec3,w:number,h:number,color:vec4):void {this.rect(parent,"Rule",pos,w,h,color,0);}
+  private dot(parent:SceneObject,pos:vec3,r:number,color:vec4):void {this.rect(parent,"Dot",pos,r*2,r*2,color,r);}
+  /** Small tracked capitals for section labels and metadata, left-aligned at `pos`. */
+  private caps(parent:SceneObject,value:string,pos:vec3,color:vec4,align:HorizontalAlignment=HorizontalAlignment.Left):Text {
+    const w=70;
+    const x=align===HorizontalAlignment.Left?pos.x+w/2:pos.x;
+    const t=this.text(parent,value,new vec3(x,pos.y,pos.z),w,4,color,T_LABEL,this.theme.font,align);
+    t.letterSpacing=0.12;
+    return t;
+  }
+  /** Shrinks a one-line label to its box instead of spilling past it. */
+  private fit(t:Text):Text {t.horizontalOverflow=HorizontalOverflow.Shrink;return t;}
+  private icon(parent:SceneObject,tex:Texture,pos:vec3,size:number,tint:vec4):SceneObject {
+    const so=this.obj(parent,"Icon",pos);
+    const img=so.createComponent("Component.Image") as Image;
     img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
-    img.mainPass.baseTex=icon;img.mainPass.baseColor=tint;
-    iconHost.getTransform().setLocalScale(new vec3(5,5,1));
-  }
-  /** Flat, unlit filled rectangle (header band / rule lines) — a thin box so it reads as a solid plane. */
-  private flatRect(parent:SceneObject,w:number,h:number,color:vec4):void {
-    const b=this.meshBuilder();
-    const ix:number[]=[];
-    addBox(b,ix,0,0,0,w/2,h/2,0.05,this.colorArr(color),0);
-    b.appendIndices(ix);
-    const v=parent.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-    v.mesh=b.getMesh();v.mainMaterial=this.material.clone();b.updateMesh();
-  }
-  /** Flat filled circle (spiral-binding rings). */
-  private flatCircle(parent:SceneObject,radius:number,color:vec4):void {
-    const b=this.meshBuilder();
-    const c=this.colorArr(color);
-    const segs=16;
-    b.appendVerticesInterleaved([0,0,0,0,0,1,...c]);
-    for(let i=0;i<=segs;i++){const a=i*2*Math.PI/segs;b.appendVerticesInterleaved([radius*Math.cos(a),radius*Math.sin(a),0,0,0,1,...c]);}
-    const ix:number[]=[];for(let i=1;i<=segs;i++)ix.push(0,i,i+1);
-    b.appendIndices(ix);
-    const v=parent.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-    v.mesh=b.getMesh();v.mainMaterial=this.material.clone();b.updateMesh();
-  }
-  private style(back:BackPlate,color:vec4,radius:number):void {
-    const rect=(back as unknown as {roundedRectangle:{gradient:boolean;backgroundColor:vec4;cornerRadius:number}}).roundedRectangle;
-    rect.gradient=false;rect.backgroundColor=color;rect.cornerRadius=radius;
+    img.mainPass.baseTex=tex;img.mainPass.baseColor=tint;
+    so.getTransform().setLocalScale(new vec3(size,size,1));
+    return so;
   }
   private meshBuilder():MeshBuilder {
     const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
     b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;return b;
   }
-  private colorArr(c:vec4):[number,number,number,number] {return [c.x,c.y,c.z,c.w];}
   private obj(parent:SceneObject,name:string,pos:vec3):SceneObject {
     const so=global.scene.createSceneObject(name);so.setParent(parent);so.getTransform().setLocalPosition(pos);return so;
   }
-  private text(parent:SceneObject,value:string,pos:vec3,w:number,h:number,color:vec4,size:number):Text {
+  private text(parent:SceneObject,value:string,pos:vec3,w:number,h:number,color:vec4,size:number,font:Font,align:HorizontalAlignment):Text {
     const so=this.obj(parent,"Text",pos);
     const t=so.createComponent("Component.Text") as Text;
-    t.text=value;t.depthTest=true;t.font=this.theme.font;t.size=size;t.textFill.color=color;
-    t.horizontalAlignment=HorizontalAlignment.Center;t.verticalAlignment=VerticalAlignment.Center;
+    t.text=value;t.depthTest=true;t.font=font;t.size=size;t.textFill.color=color;
+    t.horizontalAlignment=align;t.verticalAlignment=VerticalAlignment.Center;
     t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
     t.layoutRect=Rect.create(-w/2,w/2,-h/2,h/2);
     return t;
   }
 }
+
+function rgb(hex:number):vec4 {return new vec4(((hex>>16)&255)/255,((hex>>8)&255)/255,(hex&255)/255,1);}
+function mix(a:vec4,b:vec4,t:number):vec4 {return vec4.lerp(a,b,t);}
+function pad2(n:number):string {return n<10?"0"+n:String(n);}
+/** The page number: the trailing number of the note's label ("Note 04" → 4). */
+function pageOf(label:string):number {return Number(label.match(/(\d+)$/)?.[1])||1;}

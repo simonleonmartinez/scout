@@ -5,32 +5,73 @@
  * wizard-panel anchor line up with the geometry built here. Chosen so the whole pin+notepad assembly
  * tops out at about the Camera prop's own height (100 + notepad's own half-height ~45 ≈ 145). */
 export const NOTE_PIN_HEIGHT=100;
+/** How high the Note card's pointer tip floats above its spot on the floor (cm). */
+export const NOTE_TIP_HEIGHT=52;
 
-/** A waypoint pin shaped like a real map pin: a sharp point planted at the floor that flares wider as
- * it rises toward the notepad at eye level, rather than a uniform-width rod. Built as a single FLAT
- * triangle (not a lathed 3D volume) so it reads as one continuous 2D shape with the notepad card sitting
- * on top of it, instead of a rounded 3D pole awkwardly meeting a flat panel. Lavender-grey only, to
- * match the notepad's own palette (no blue/cyan anywhere in this asset). */
+/** Where a Note is anchored: a small lavender disc on the floor and a faint dotted guide rising to the
+ * tip of the card's pointer, so the floating card still reads as pinned to this spot. The disc is built
+ * first so it's the mesh the floor-placement code measures (its bottom is the note's foot). */
 export function buildWaypointPin(root:SceneObject, material:Material, height:number):SceneObject {
-  const grey:[number,number,number,number]=[0.58,0.55,0.64,1];
+  const lav:[number,number,number,number]=[0.667,0.569,0.835,1];
   const pin=global.scene.createSceneObject("Pin");pin.setParent(root);
   const pb=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
   pb.topology=MeshTopology.Triangles;pb.indexType=MeshIndexType.UInt16;
-  const halfW=7,topY=height*0.97;
-  // Double-sided (both winding orders) so the flat triangle reads correctly from either side, not just
-  // one — the same lesson learned earlier with the rotary dial's fill circle.
-  const tris:[number,number,number][][]=[
-    [[0,0,0],[-halfW,topY,0],[halfW,topY,0]],
-    [[0,0,0],[halfW,topY,0],[-halfW,topY,0]],
-  ];
-  let vi=0;const ix:number[]=[];
-  tris.forEach(tri=>{
-    tri.forEach(p=>pb.appendVerticesInterleaved([p[0],p[1],p[2],0,0,1,...grey]));
-    ix.push(vi,vi+1,vi+2);vi+=3;
-  });
+  const ix:number[]=[];let vi=0;
+  // Floor disc (flat, facing up, both sides).
+  const disc=(cx:number,cy:number,r:number,upright:boolean)=>{
+    const segs=20;
+    pb.appendVerticesInterleaved([cx,cy,0,0,upright?0:1,upright?1:0,...lav]);
+    for(let i=0;i<=segs;i++){
+      const a=i*2*Math.PI/segs;
+      const x=cx+r*Math.cos(a),o=r*Math.sin(a);
+      pb.appendVerticesInterleaved(upright?[x,cy+o,0,0,0,1,...lav]:[x,cy,o,0,1,0,...lav]);
+    }
+    for(let i=1;i<=segs;i++)ix.push(vi,vi+i,vi+i+1,vi,vi+i+1,vi+i);
+    vi+=segs+2;
+  };
+  disc(0,0,4,false);
+  // Guide: small dots from just above the floor up to just under the pointer's tip.
+  for(let y=6;y<height-3;y+=7)disc(0,y,0.55,true);
   pb.appendIndices(ix);
   const pv=pin.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
   pv.mesh=pb.getMesh();pv.mainMaterial=material.clone();pb.updateMesh();
+  return root;
+}
+
+/** The Note tool's aiming ghost: a miniature of the field-journal card (page, tab, a few lines of text)
+ * standing on its pointer over a small floor disc — about 30cm tall, like the other tools' ghosts.
+ * Flat and double-sided, in the card's lavender. */
+export function buildNoteGhost(parent:SceneObject, material:Material):SceneObject {
+  const root=global.scene.createSceneObject("Note preview");root.setParent(parent);
+  const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
+  b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
+  const paper:[number,number,number,number]=[0.914,0.878,0.961,1],purple:[number,number,number,number]=[0.463,0.337,0.71,1];
+  const lav:[number,number,number,number]=[0.667,0.569,0.835,1],tab:[number,number,number,number]=[0.80,0.73,0.90,1];
+  const ix:number[]=[];let vi=0;
+  const quad=(x0:number,y0:number,x1:number,y1:number,z:number,c:number[])=>{
+    for(const [x,y] of [[x0,y0],[x1,y0],[x1,y1],[x0,y1]])b.appendVerticesInterleaved([x,y,z,0,0,1,...c]);
+    ix.push(vi,vi+1,vi+2,vi,vi+2,vi+3,vi,vi+2,vi+1,vi,vi+3,vi+2);vi+=4;
+  };
+  const tri=(pts:number[][],z:number,c:number[])=>{
+    pts.forEach(p=>b.appendVerticesInterleaved([p[0],p[1],z,0,0,1,...c]));
+    ix.push(vi,vi+1,vi+2,vi,vi+2,vi+1);vi+=3;
+  };
+  // Floor disc.
+  const segs=16;b.appendVerticesInterleaved([0,0.3,0,0,1,0,...lav]);
+  for(let i=0;i<=segs;i++){const a=i*2*Math.PI/segs;b.appendVerticesInterleaved([3*Math.cos(a),0.3,3*Math.sin(a),0,1,0,...lav]);}
+  for(let i=1;i<=segs;i++)ix.push(vi,vi+i,vi+i+1,vi,vi+i+1,vi+i);vi+=segs+2;
+  // Pointer, page, tab, and a few "lines" of content.
+  tri([[-3.5,9.5],[3.5,9.5],[0,5]],0,paper);
+  quad(-9,9,9,29,0,paper);
+  quad(-8.5,29,-1.5,31.2,0,tab);
+  quad(-7,24.5,1,26.5,0.05,purple);
+  quad(-7,21.5,6.5,22.2,0.05,lav);
+  quad(-7,17.5,6.5,19.7,0.05,lav);
+  quad(-7,13.5,0,15.7,0.05,lav);
+  quad(2,11.4,7,13.4,0.05,purple);
+  b.appendIndices(ix);
+  const v=root.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+  v.mesh=b.getMesh();v.mainMaterial=material;b.updateMesh();
   return root;
 }
 
@@ -57,7 +98,7 @@ export function buildMarkerMesh(parent:SceneObject, kind:number, material:Materi
     mesh("Light base",b=>{buildLathe(b,[[0,-4],[1,-4],[1.1,-2],[0,-2]],24,dark)});
     mesh("Light rays",b=>{const ix:number[]=[];let v=0;v=addBox(b,ix,-4.3,1,0,0.65,0.22,0.22,warm,v);v=addBox(b,ix,4.3,1,0,0.65,0.22,0.22,warm,v);v=addBox(b,ix,0,6,0,0.22,0.65,0.22,warm,v);b.appendIndices(ix)});
   }else{
-    buildWaypointPin(root,material,NOTE_PIN_HEIGHT);
+    buildWaypointPin(root,material,NOTE_TIP_HEIGHT);
   }
   return root;
 }
