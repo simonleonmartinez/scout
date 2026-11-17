@@ -288,6 +288,8 @@ export class ScoutMain extends BaseScriptComponent {
   /** Camera props' height sliders: shown beside the prop only while it's in edit mode. */
   /** Standing dummies whose limbs can be posed (in edit mode), by marker root. */
   private dummies=new Map<SceneObject,PosableDummy>();
+  /** Each dummy's height when it was built: its labels were laid out for that (see fitDummy). */
+  private dummyBuiltHeight=new Map<SceneObject,number>();
   private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:TiltRig;wheel:TiltWheel;afterAim?:()=>void}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
@@ -622,6 +624,46 @@ export class ScoutMain extends BaseScriptComponent {
       t.setLocalPosition(t.getLocalPosition().sub(new vec3(0,feet,0)));
     }
   }
+  /** Keeps a dummy's marker at the middle of its body and its hit box around it, so a dummy tipped over
+   * by its hips (see PosableDummy) still sits on its spot, shows its halo and labels over itself, and can
+   * be grabbed anywhere along it. `moveMarker` moves the marker to the body (after a pose change, so
+   * nothing jumps); otherwise the body is moved onto the marker (when building it, e.g. from a saved
+   * layout, whose saved spot is that middle). Resting on the floor is left to liftOnto. */
+  private fitDummy(root:SceneObject,moveMarker:boolean):void {
+    const dummy=this.dummies.get(root);
+    if(!dummy||isNull(dummy.root))return;
+    const rt=root.getTransform(),b=dummy.bounds();
+    if(!Number.isFinite(b.min.x)||b.max.x<b.min.x)return;
+    const p=rt.getWorldPosition();
+    const delta=b.min.add(b.max).uniformScale(0.5).sub(p);
+    if(delta.length>0.5){
+      if(moveMarker)rt.setWorldPosition(p.add(delta));
+      const dt=dummy.root.getTransform();
+      const shift=dummy.root.getParent().getTransform().getInvertedWorldTransform().multiplyDirection(delta);
+      dt.setLocalPosition(dt.getLocalPosition().sub(shift));
+    }
+    // Hit box: wide enough for the body in the marker's own (yawed) frame; its height is unchanged.
+    const col=root.getComponent("Physics.ColliderComponent") as ColliderComponent;
+    const shape=col?col.shape as BoxShape:null;
+    if(!shape)return;
+    const c=rt.getWorldPosition(),inv=rt.getWorldRotation().invert();
+    const bb=dummy.bounds();
+    let ax=0,az=0;
+    for(const x of [bb.min.x,bb.max.x])for(const z of [bb.min.z,bb.max.z]){
+      const l=inv.multiplyVec3(new vec3(x-c.x,0,z-c.z));
+      ax=Math.max(ax,Math.abs(l.x));az=Math.max(az,Math.abs(l.z));
+    }
+    const box=Shape.createBoxShape();
+    const h=bb.max.y-bb.min.y;
+    box.size=new vec3(Math.max(55,ax*2+10),Math.max(30,h),Math.max(55,az*2+10));
+    col.shape=box;
+    // The name tag and badges float a set height over the middle: lower them with the body.
+    const ui=findChild(root,"Facing UI"),built=this.dummyBuiltHeight.get(root);
+    if(ui&&built!==undefined){
+      const t=ui.getTransform(),l=t.getLocalPosition();
+      t.setLocalPosition(new vec3(l.x,(h-built)/2,l.z));
+    }
+  }
   /** Moves a marker vertically so its lowest point rests at `surfaceY`. */
   private liftOnto(root:SceneObject,surfaceY:number):void {
     const t=root.getTransform();
@@ -631,6 +673,8 @@ export class ScoutMain extends BaseScriptComponent {
   private keepAboveFloor():void {
     this.placed.forEach((root,i)=>{
       if(isNull(root))return;
+      // A dummy mid-pose may swing through the floor (tipping it over by the hips); it settles on release.
+      if(this.dummies.get(root)?.dragging)return;
       const floor=this.floorY===null?this.groundY[i]:this.floorY;
       if(this.bottomOf(root)<floor-0.5){
         this.liftOnto(root,floor);
@@ -1108,10 +1152,16 @@ export class ScoutMain extends BaseScriptComponent {
       height=dummy.top()-dummy.bottom();
       t.setLocalPosition(new vec3(0,-height/2-feet,0));
       this.pivotAtFeet(root,body,dummy.bottom());
-      this.dummies.set(root,dummy);
+      this.dummies.set(root,dummy);this.dummyBuiltHeight.set(root,height);
       // Posing pivots at the joints, so bending the knees would leave it floating: let go, and its
       // lowest point drops back to where it was.
-      dummy.onChanged=before=>{this.lastAction=getTime();if(!isNull(root))this.liftOnto(root,before);};
+      dummy.onChanged=before=>{
+        this.lastAction=getTime();
+        if(isNull(root))return;
+        this.fitDummy(root,true);
+        this.liftOnto(root,before);
+        if(this.editing===root)this.gizmo.update();
+      };
     }else if(prefab){
       const model=prefab.instantiate(body),t=model.getTransform();
       t.setLocalScale(t.getLocalScale().uniformScale(height/30));
@@ -1164,6 +1214,8 @@ export class ScoutMain extends BaseScriptComponent {
     col.shape=shape;col.debugDrawEnabled=this.debugColliders;
     if(rig)this.attachRigControls(root,rig,cameraState,height,col,{sliderY:SLIDER_Y,camera:rig});
     if(lightRigObj)this.attachRigControls(root,lightRigObj,lightState,height,col,{sliderY:LIGHT_SLIDER_Y,savedTilt:lightState.tilt||0});
+    // A saved dummy may be lying down: centre it on its marker and fit its hit box (see fitDummy).
+    if(this.dummies.has(root))this.fitDummy(root,false);
     const interactable=root.createComponent(Interactable.getTypeName()) as Interactable;
     interactable.targetingMode=3;
     interactable.onTriggerStart.add(e=>{
@@ -1622,4 +1674,9 @@ export class ScoutMain extends BaseScriptComponent {
       hasCaster=true;
     });
   }
+}
+
+function findChild(root:SceneObject,name:string):SceneObject|null {
+  for(let i=0;i<root.getChildrenCount();i++)if(root.getChild(i).name===name)return root.getChild(i);
+  return null;
 }

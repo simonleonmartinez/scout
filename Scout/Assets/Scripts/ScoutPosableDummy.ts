@@ -18,8 +18,11 @@ type Hinge={axis:vec3;min:number;max:number};
 // through a `sleeve` of the original mesh that deforms with the bend (the kneecap stretches over it)
 // rather than two rigid pieces that would gape open at the front.
 const KNEE:Hinge={axis:new vec3(1,0,0),min:0,max:140};
-const JOINTS:{name:string;parent:string|null;pivot:vec3;limit:number;lo:vec3;hi:vec3;ball?:vec3;ballAt?:vec3;hinge?:Hinge;sleeve?:SleeveData}[]=[
-  {name:"pelvis",parent:null,pivot:new vec3(0,0,0),limit:0,lo:new vec3(-2.3,13.5,-2),hi:new vec3(2.3,17,1.9)},
+const JOINTS:{name:string;parent:string|null;pivot:vec3;limit:number;lo:vec3;hi:vec3;ball?:vec3;ballAt?:vec3;dotAt?:vec3;hinge?:Hinge;sleeve?:SleeveData}[]=[
+  // The hips are the whole figure's handle: they turn about the point between the feet, so pulling them
+  // tips the dummy over (onto its back, front or side) — no separate tilt control. Their dot sits at the
+  // hips, not at that pivot on the floor.
+  {name:"pelvis",parent:null,pivot:new vec3(0,0,0),limit:90,lo:new vec3(-2.3,13.5,-2),hi:new vec3(2.3,17,1.9),dotAt:new vec3(0,15.3,0)},
   {name:"torso",parent:"pelvis",pivot:new vec3(0,17,-0.1),limit:40,lo:new vec3(-2.7,17,-2.6),hi:new vec3(2.7,24.3,2.3),ball:new vec3(1.5,0.54,1.04),ballAt:new vec3(0,16.6,-0.1)},
   {name:"head",parent:"torso",pivot:new vec3(0,24.3,-0.55),limit:55,lo:new vec3(-2.4,24.3,-2.7),hi:new vec3(2.4,30,2.7),ball:new vec3(0.78,0.78,0.78),ballAt:new vec3(0,23.9,-0.45)},
   {name:"upperArmL",parent:"torso",pivot:new vec3(3.8,22.2,-0.5),limit:170,lo:new vec3(2.7,17.8,-1.9),hi:new vec3(4.7,23.4,0.7),ball:new vec3(0.63,0.63,0.63),ballAt:new vec3(3.5,22.4,-0.4)},
@@ -99,7 +102,7 @@ export class PosableDummy {
       if(j.sleeve&&j.hinge&&material)this.addSleeve(j.parent?this.nodes[j.parent]:this.root,parentSpec?parentSpec.pivot:vec3.zero(),node,j.pivot,j.hinge.axis,j.sleeve,material);
       if(j.limit>0){
         this.addGrab(node,j);
-        if(dots)this.addDot(node,dots);
+        if(dots)this.addDot(node,dots,j.dotAt?j.dotAt.sub(j.pivot):vec3.zero());
       }
     });
     if(pose)this.applyPose(pose);
@@ -136,6 +139,18 @@ export class PosableDummy {
     let y=-Infinity;
     for(const v of this.pieceVisuals)if(!isNull(v))y=Math.max(y,v.worldAabbMax().y);
     return y;
+  }
+  /** World-space box around the whole figure, whatever its pose. */
+  bounds():{min:vec3;max:vec3} {
+    // Plain numbers: a vec3 can't hold Infinity (it becomes 0).
+    const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
+    for(const v of this.pieceVisuals){
+      if(isNull(v))continue;
+      const a=v.worldAabbMin(),b=v.worldAabbMax();
+      lo[0]=Math.min(lo[0],a.x);lo[1]=Math.min(lo[1],a.y);lo[2]=Math.min(lo[2],a.z);
+      hi[0]=Math.max(hi[0],b.x);hi[1]=Math.max(hi[1],b.y);hi[2]=Math.max(hi[2],b.z);
+    }
+    return {min:new vec3(lo[0],lo[1],lo[2]),max:new vec3(hi[0],hi[1],hi[2])};
   }
   pose():DummyPose {
     const out:DummyPose={};
@@ -268,8 +283,9 @@ export class PosableDummy {
     visual.meshShadowMode=MeshShadowMode.Both;
     this.visuals.push(visual);
   }
-  private addDot(node:SceneObject,material:Material):void {
+  private addDot(node:SceneObject,material:Material,at:vec3):void {
     const dot=global.scene.createSceneObject("Joint");dot.setParent(node);
+    dot.getTransform().setLocalPosition(at);
     const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
     b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
     const lat=6,lon=10,idx:number[]=[];
