@@ -1,5 +1,5 @@
-import {Interactable,TargetingPriority} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
-import {Interactor} from "SpectaclesInteractionKit.lspkg/Core/Interactor/Interactor";
+import {Interactable,TargetingPriority} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {Interactor} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 import {addHoverFeedback} from "./ScoutHover";
 import {buildLathe} from "./ScoutMarkerMesh";
 import {placeInView,followView,child,panel,text,image,sweepColliders,pillButton,TITLE_INK,BODY_INK,PANEL_TINT} from "./ScoutOnboarding";

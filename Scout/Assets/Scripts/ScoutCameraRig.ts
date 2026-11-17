@@ -1,6 +1,6 @@
-import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
-import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
-import {Interactor,TargetingMode} from "SpectaclesInteractionKit.lspkg/Core/Interactor/Interactor";
+import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
+import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {Interactor,TargetingMode} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 import {addBackPlateHover,addHoverFeedback} from "./ScoutHover";
 import {BODY_INK,child,image,panel,styleBack} from "./ScoutOnboarding";
 

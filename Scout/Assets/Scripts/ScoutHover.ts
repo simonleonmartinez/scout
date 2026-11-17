@@ -1,7 +1,7 @@
-import animate,{CancelFunction} from "SpectaclesInteractionKit.lspkg/Utils/animate";
-import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
-import {InteractorEvent} from "SpectaclesInteractionKit.lspkg/Core/Interactor/InteractorEvent";
-import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
+import animate,{CancelFunction} from "InteractionKit.lspkg/Utils/animate";
+import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {InteractorEvent} from "InteractionKit.lspkg/Core/Interactor/InteractorEvent";
+import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
 
 /** Shared purple used for every hover glow, so anything interactive reads the same way under the cursor. */
 export const HOVER_GLOW=new vec4(0.66,0.5,1,1);

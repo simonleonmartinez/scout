@@ -1,5 +1,5 @@
-import {HandInputData} from "SpectaclesInteractionKit.lspkg/Providers/HandInputData/HandInputData";
-import {BaseHand} from "SpectaclesInteractionKit.lspkg/Providers/HandInputData/BaseHand";
+import {HandInputData} from "InteractionKit.lspkg/Providers/HandInputData/HandInputData";
+import {BaseHand} from "InteractionKit.lspkg/Providers/HandInputData/BaseHand";
 
 // Fist detection from hand keypoints: how far the middle/ring/pinky tips sit from the wrist, as a
 // fraction of their knuckles' distance. Measured in the preview: fist ~0.8, pinch ~1.67, relaxed

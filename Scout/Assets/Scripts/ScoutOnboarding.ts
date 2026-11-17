@@ -1,7 +1,7 @@
-import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
-import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
+import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
+import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {addBackPlateHover} from "./ScoutHover";
-import animate from "SpectaclesInteractionKit.lspkg/Utils/animate";
+import animate from "InteractionKit.lspkg/Utils/animate";
 
 const FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 // Brand inks: lavender titles (as in the bench header), cream body text, on a dark gear-grey panel.

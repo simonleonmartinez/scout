@@ -1,5 +1,5 @@
-import {Interactable,TargetingPriority} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
-import {Interactor,TargetingMode} from "SpectaclesInteractionKit.lspkg/Core/Interactor/Interactor";
+import {Interactable,TargetingPriority} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {Interactor,TargetingMode} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 import {KNEE_SLEEVES,SleeveData} from "./ScoutDummySleeves";
 
 /** A pose: each moved joint's local rotation as [w,x,y,z]. Joints left at rest are omitted. */

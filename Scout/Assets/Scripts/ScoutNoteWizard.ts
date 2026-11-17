@@ -1,7 +1,7 @@
-import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {addBackPlateHover} from "./ScoutHover";
-import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
-import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
+import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
+import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {addBox} from "./ScoutMarkerMesh";
 import {NoteAssetState, SHOT_TYPE_STEPS, MOVEMENT_STEPS, PHOTO_SHOT_TYPE_STEPS, PHOTO_ANGLE_STEPS} from "./ScoutAssetState";
 

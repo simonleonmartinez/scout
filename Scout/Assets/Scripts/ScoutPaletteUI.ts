@@ -1,10 +1,10 @@
-import Event from "SpectaclesInteractionKit.lspkg/Utils/Event";
-import {BackPlate} from "SpectaclesUIKit.lspkg/Scripts/BackPlate";
-import {ElementContent} from "SpectaclesUIKit.lspkg/Scripts/Components/Content/ElementContent";
-import {FlexLayout} from "SpectaclesUIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexLayout";
-import {FlexItem} from "SpectaclesUIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexItem";
-import {FlexAlign, FlexAlignSelf, FlexDirection, FlexJustify} from "SpectaclesUIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexTypes";
-import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
+import Event from "InteractionKit.lspkg/Utils/Event";
+import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
+import {ElementContent} from "UIKit.lspkg/Scripts/Components/Content/ElementContent";
+import {FlexLayout} from "UIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexLayout";
+import {FlexItem} from "UIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexItem";
+import {FlexAlign, FlexAlignSelf, FlexDirection, FlexJustify} from "UIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexTypes";
+import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {ScoutRotaryDial, RotaryDialTheme, DialStep} from "./ScoutRotaryDial";
 import {ScoutNoteWizard, NoteWizardTheme} from "./ScoutNoteWizard";
 import {addBackPlateHover, addHoverFeedback} from "./ScoutHover";
@@ -766,7 +766,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const ec=so.createComponent(ElementContent.getTypeName()) as ElementContent;
     ec.sizeOverride=new vec2(w,h);
     ec.text=label;ec.textSize=TYPE_SCALE.Body.size;ec.leadingIcon=icon;ec.spacing=0.65;
-    ec.autoResize=false;ec.contentAlignment="center";
+    ec.autoResize=false; // text is centred by default (UIKit 4 dropped contentAlignment)
     // ElementContent defers building its Text/Icon children until the BackPlate sibling's own
     // onInitialized fires; subscribing here (after that content-building subscription is registered
     // above) guarantees this runs once the Text node actually exists, instead of racing a fixed delay.

@@ -1,6 +1,6 @@
-import animate from "SpectaclesInteractionKit.lspkg/Utils/animate";
-import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
-import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
+import animate from "InteractionKit.lspkg/Utils/animate";
+import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {addHoverFeedback} from "./ScoutHover";
 import {addBox,buildLathe} from "./ScoutMarkerMesh";
 

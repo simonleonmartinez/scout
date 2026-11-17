@@ -1,5 +1,5 @@
-import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
-import {Interactor} from "SpectaclesInteractionKit.lspkg/Core/Interactor/Interactor";
+import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {Interactor} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 import {addBox} from "./ScoutMarkerMesh";
 
 /** One selectable stop on a dial — the underlying numeric value plus how it's displayed. */

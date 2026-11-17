@@ -1,5 +1,5 @@
-import {Interactable} from "SpectaclesInteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
-import {Interactor,TargetingMode} from "SpectaclesInteractionKit.lspkg/Core/Interactor/Interactor";
+import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {Interactor,TargetingMode} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 import {buildLathe} from "./ScoutMarkerMesh";
 import {RING_GLOW,RING_GLOW_TUBE,RING_GLOW_LINGER} from "./ScoutCameraRig";
 

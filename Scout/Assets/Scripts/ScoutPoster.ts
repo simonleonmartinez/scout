@@ -1,4 +1,4 @@
-import {IMAGE_MATERIAL_ASSET} from "SpectaclesUIKit.lspkg/Scripts/Utility/Assets";
+import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {addBox} from "./ScoutMarkerMesh";
 
 /** A moodboard poster pinned flat against a real wall, facing out along its local +Z. Until phone pairing
