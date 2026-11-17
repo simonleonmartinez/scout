@@ -191,6 +191,8 @@ export class ScoutNoteWizard {
         this.text(tile,t,new vec3(0,0,0.3),todW-2,7,sel?WHITE:INK,T_LABEL+12,this.theme.font,HorizontalAlignment.Center);
       });
     });
+    // Skip leaves the scene setup unset and moves on; Done keeps what's picked.
+    this.pill(this.card,"Skip",new vec3(W/2-PAD-40,9,0.3),24,9,PAPER_2,PURPLE,null,()=>this.commit({interior:null,timeOfDay:null,step:4}));
     this.pill(this.card,"Done",new vec3(W/2-PAD-13,9,0.3),26,9,PURPLE,WHITE,null,()=>this.commit({step:4}));
     this.backButton(h);
     return h;
@@ -312,8 +314,8 @@ export class ScoutNoteWizard {
   // ─── Shared pieces ───────────────────────────────────────────────────────────────────────────────────
   /** Question-step header: progress caps, the step title in serif, back on the left. */
   private stepHeader(h:number,title:string,progress:string):void {
-    this.caps(this.card,(this.photo?"NEW PHOTO NOTE":"NEW SHOT NOTE")+"  •  "+progress,new vec3(-INNER/2+11,h-8,0.3),INK_SOFT);
-    this.text(this.card,title,new vec3(-INNER/2+11+30,h-17,0.3),60,12,INK,T_STEP,SERIF,HorizontalAlignment.Left);
+    this.caps(this.card,(this.photo?"PHOTO NOTE":"SHOT NOTE")+" • "+progress,new vec3(-INNER/2+21,h-8,0.3),INK_SOFT);
+    this.text(this.card,title,new vec3(-INNER/2+21+25,h-17,0.3),50,12,INK,T_STEP,SERIF,HorizontalAlignment.Left);
     this.headerActions(h);
     this.rule(this.card,h-25);
   }
@@ -322,7 +324,9 @@ export class ScoutNoteWizard {
     this.round(this.card,"EditBadge",new vec3(W/2-PAD-14,h-11,0.3),EDIT_ICON,PURPLE,this.onEdit);
     this.round(this.card,"DeleteBadge",new vec3(W/2-PAD-4,h-11,0.3),TRASH_ICON,PURPLE,this.onDelete);
   }
-  /** Back one question; from the first question, back to the finished page (if any) or a fresh page. */
+  /** Back one question; from the first question, back to the finished page (if any) or a fresh page.
+   * Next to it, forward one question — only once this question already has an answer (editing a note),
+   * so a new note still walks through every pick. Scene setup has Skip and Done instead. */
   private backButton(h:number):void {
     const step=this.state.step;
     const finished=this.state.shotType!==null&&this.state.movementType!==null;
@@ -331,6 +335,12 @@ export class ScoutNoteWizard {
     this.button(so,8,8,PAPER_2,4,()=>this.commit({step:target}));
     const ic=this.icon(so,ARROW_ICON,new vec3(0,0,0.3),4.6,INK);
     ic.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.forward()));
+    const answered=step===1?finished:step===2?this.state.shotType!==null:step===3?this.state.movementType!==null:false;
+    if(!answered)return;
+    const next=(step===1?2:step===2?3:5) as NoteAssetState["step"];
+    const fo=this.obj(this.card,"Forward",new vec3(-INNER/2+14,h-12.5,0.3));
+    this.button(fo,8,8,PAPER_2,4,()=>this.commit({step:next}));
+    this.icon(fo,ARROW_ICON,new vec3(0,0,0.3),4.6,INK);
   }
   private firstStep():1|2 {return this.photo?2:1;}
 
