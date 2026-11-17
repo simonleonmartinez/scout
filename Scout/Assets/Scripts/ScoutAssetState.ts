@@ -101,4 +101,6 @@ export const MOVEMENT_STEPS:IconStep[]=[
   {label:"Tracking",icon:requireAsset("../Icons/directions_walk.png") as Texture},
   {label:"Zoom",icon:requireAsset("../Icons/zoom_in.png") as Texture},
   {label:"Handheld",icon:requireAsset("../Icons/pan_tool.png") as Texture},
+  // Appended (not first) so notes saved before it keep their movement index.
+  {label:"Static",icon:requireAsset("../Icons/center_focus_strong.png") as Texture},
 ];

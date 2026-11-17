@@ -153,9 +153,9 @@ export class ScoutNoteWizard {
   }
   /** Framing / movement / angle: icon tiles; tapping one picks it and moves on. */
   private buildStepChoices(title:string,steps:{label:string;icon:Texture}[],onPick:(index:number)=>void):number {
-    const cols=steps.length>4?3:steps.length,rows=Math.ceil(steps.length/cols);
+    const cols=steps.length>6?4:steps.length>4?3:steps.length,rows=Math.ceil(steps.length/cols);
     const cellW=INNER/cols,cellH=19;
-    const h=40+rows*(cellH+2.5)+4;
+    const h=38+(rows-1)*(cellH+2.5)+cellH/2+6; // the last row's bottom, plus a margin
     const n=this.photo?(this.state.step===2?"1 OF 3":"2 OF 3"):(this.state.step===2?"2 OF 4":"3 OF 4");
     this.stepHeader(h,title,n);
     const current=this.state.step===2?this.state.shotType:this.state.movementType;

@@ -15,7 +15,7 @@ export function parseLayout(raw:string):ScoutLayout {
     const c=m.cameraState,l=m.lightState,n=m.noteState;
     if(c!==undefined&&(m.kind!==0||!c||!index(c.isoIndex,7)||!index(c.apertureIndex,9)||!index(c.shutterIndex,18)||!index(c.kelvinIndex,11)))throw new Error('Invalid camera settings');
     if(l!==undefined&&(m.kind!==1||!l||!index(l.intensityIndex,20)||!index(l.kelvinIndex,11)))throw new Error('Invalid light settings');
-    if(n!==undefined&&(m.kind!==2||!n||!index(n.step,5)||(n.interior!=null&&!index(n.interior,1))||(n.timeOfDay!=null&&!index(n.timeOfDay,2))||(n.notes!==undefined&&(typeof n.notes!=='string'||n.notes.length>240))||!index(n.shotNumber,10)||n.shotNumber<1||(n.shotType!==null&&!index(n.shotType,5))||(n.movementType!==null&&!index(n.movementType,5))))throw new Error('Invalid note settings');
+    if(n!==undefined&&(m.kind!==2||!n||!index(n.step,5)||(n.interior!=null&&!index(n.interior,1))||(n.timeOfDay!=null&&!index(n.timeOfDay,2))||(n.notes!==undefined&&(typeof n.notes!=='string'||n.notes.length>240))||!index(n.shotNumber,10)||n.shotNumber<1||(n.shotType!==null&&!index(n.shotType,5))||(n.movementType!==null&&!index(n.movementType,6))))throw new Error('Invalid note settings');
     const p=m.pose;
     if(p!==undefined&&((m.kind!==3&&m.kind!==4)||!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).length>13||!Object.values(p).every(q=>vector(q,4))))throw new Error('Invalid pose');
     const norm=m.rotation.reduce((sum:number,x:number)=>sum+x*x,0);
