@@ -329,7 +329,9 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     let rect:RoundedRectangle=null;
     const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
     back.style="simple";back.size=new vec2(w,h);
-    const img=this.hubIcon(so,icon,tile?new vec3(0,1.9,0.3):new vec3(-w/2+3.0,0,0.3),tile?4.6:3.4,HUB_PURPLE);
+    // The dummies are tall, thin figures, so they get a bigger box to match the Hand icon's visual size.
+    const iconSize=tile?4.6:(kind===3||kind===4)?4.8:3.4;
+    const img=this.hubIcon(so,icon,tile?new vec3(0,1.9,0.3):new vec3(-w/2+3.0,0,0.3),iconSize,HUB_PURPLE);
     // Segment labels share one size that fits the longest ("Standing"), so none gets shrunk smaller than its siblings.
     const text=tile?this.hubText(so,label,new vec3(0,-3.1,0.3),w-1,4,HUB_INK,HUB_T_TILE,THEME_FONT,HorizontalAlignment.Center)
       :this.hubText(so,label,new vec3(-w/2+5.2,0,0.3),w-5.6,4,HUB_INK,HUB_T_SEG,THEME_FONT,HorizontalAlignment.Left);
