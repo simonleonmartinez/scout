@@ -30,7 +30,7 @@
     Presets:
       Performance Compression: !<PerformanceCompressionSettings>
         Level: Medium
-        Mipmap: false
+        Mipmap: true
       None Compression: !<FileCompressionSettings>
         {}
     ExtensionMappings:

@@ -40,7 +40,7 @@
         {}
       Performance Compression: !<PerformanceCompressionSettings>
         Level: Medium
-        Mipmap: false
+        Mipmap: true
     ExtensionMappings:
       mesh: None Compression
       png: Performance Compression
