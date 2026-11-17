@@ -335,6 +335,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>this.confirmFloor(y));
     this.palette.onResetFloor.add(()=>this.resetFloor());
     this.setupOcclusion();
+    this.palette.onToggleShootType.add(()=>{if(this.shootType)this.chooseShoot(this.shootType==="photo"?"video":"photo");});
     this.palette.onToggleOcclusion.add(()=>{this.lastAction=getTime();this.setOcclusion(!this.occlusionOn);this.selectAudio.play(1);});
     this.workbench=new ScoutWorkbench(this.markerMaterial,this.camera,{
       bench:this.workbenchPrefab,cinemaCamera:this.cinemaCameraPrefab,gimbal:this.gimbalPrefab,lens:this.lensPrefab,

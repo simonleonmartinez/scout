@@ -1,5 +1,7 @@
 import Event from "InteractionKit.lspkg/Utils/Event";
+import animate,{CancelFunction} from "InteractionKit.lspkg/Utils/animate";
 import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
+import {RoundedRectangle} from "UIKit.lspkg/Scripts/Visuals/RoundedRectangle/RoundedRectangle";
 import {ElementContent} from "UIKit.lspkg/Scripts/Components/Content/ElementContent";
 import {FlexLayout} from "UIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexLayout";
 import {FlexItem} from "UIKit.lspkg/Scripts/Components/Layout2D/Flex/FlexItem";
@@ -13,12 +15,13 @@ import {CameraAssetState, LightAssetState, NoteAssetState, ISO_STOPS, APERTURE_S
 
 const ICONS: Texture[] = [requireAsset("../Icons/videocam.png") as Texture, requireAsset("../Icons/lightbulb.png") as Texture, requireAsset("../Icons/sticky_note_2.png") as Texture, requireAsset("../Icons/undo.png") as Texture, requireAsset("../Icons/delete.png") as Texture];
 // The subject icon is the Violet dummy's face (Icons/dummy_face.png).
-const ACTOR_ICONS:Texture[]=[requireAsset("../Icons/dummy_face.png") as Texture,requireAsset("../Icons/chair.png") as Texture];
+const ACTOR_ICONS:Texture[]=[requireAsset("../Icons/dummy_standing.png") as Texture,requireAsset("../Icons/dummy_seated.png") as Texture];
 const HAND_ICON=requireAsset("../Icons/pan_tool.png") as Texture;
 const RESET_FLOOR_ICON=requireAsset("../Icons/restart_alt.png") as Texture;
 const FLOOR_RESET_ICON=requireAsset("../Icons/reset_floor.png") as Texture;
 const OCCLUSION_ICON=requireAsset("../Icons/visibility.png") as Texture;
 const LAYOUTS_ICON=requireAsset("../Icons/bookmarks.png") as Texture;
+const SWAP_ICON=requireAsset("../Icons/swap_horiz.png") as Texture;
 const MOODBOARD_ICON=requireAsset("../Icons/photo_library.png") as Texture;
 const MIC_ICON=requireAsset("../Icons/mic.png") as Texture;
 // Room for MAX_SAVED_LAYOUTS rows of 5 plus 1cm gaps.
@@ -69,11 +72,9 @@ const CAP_WIDTH=6,CAP_HEIGHT=14;
 const TOOLBAR_ICON=6,TOOLBAR_GAP=1.2,TOOLBAR_COUNT=5;
 // Selected tool: a purple ring this much wider than the button on each side (cm).
 const SELECTED_RING=0.6;
-const SELECTED_TINT=new vec4(0x8a/255,0x6c/255,0xf0/255,1);
 const COLLAPSED_SIZE=new vec2(TOOLBAR_ICON+3,TOOLBAR_COUNT*TOOLBAR_ICON+(TOOLBAR_COUNT-1)*TOOLBAR_GAP+3);
 // Reset Floor floats on its own above the tool bar, in a quieter grey, so it doesn't read as a placeable asset.
 const FLOOR_BUTTON=7.5,FLOOR_GAP=3.5;
-const FLOOR_TINT=new vec4(0x2a/255,0x26/255,0x36/255,1);
 const TOOL_NAMES=["Camera","Light","Notepad","Standing","Seated","Hand"];
 // A sixth, non-placeable "tool" — lets someone done placing things freely tap/drag existing markers
 // without an empty-space pinch accidentally dropping a new one. Kept in sync with ScoutMain's own copy.
@@ -84,6 +85,21 @@ const THEME_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 const TYPE_SCALE = {Title2:{size:110,weight:700},Body:{size:72,weight:600},Caption:{size:60,weight:500}};
 // The whole floating menu (panel, buttons, icons, text) is built in cm and then enlarged by this.
 const MENU_SCALE=1.15;
+// ── The creative hub (expanded menu): lavender field-journal styling, shared with the Note notebook. ──
+const HUB_PAPER=hex(0xE9E0F5),HUB_PAPER_2=hex(0xF4EFF9),HUB_PURPLE=hex(0x7656B5),HUB_INK=hex(0x393047),HUB_ACCENT=hex(0xAA91D5);
+const HUB_INK_SOFT=vec4.lerp(HUB_INK,HUB_PAPER,0.4),HUB_RULE=vec4.lerp(HUB_PAPER,HUB_ACCENT,0.55),HUB_WHITE=new vec4(1,1,1,1);
+const HUB_SERIF=requireAsset("../Fonts/DM Serif Display.ttf") as Font;
+const HUB_W=52,HUB_H=72.5,HUB_PAD=3,HUB_INNER=HUB_W-HUB_PAD*2;
+// Text sizes for reading the menu at ~125cm (see feedback-large-text memory): never below ~95.
+const HUB_T_TILE=100,HUB_T_SEG=92,HUB_T_CAPS=92,HUB_T_STATUS=108,HUB_T_TITLE=240;
+// How long Clear All waits for its confirming second tap (s).
+const CLEAR_CONFIRM_SECONDS=3;
+// Opening the menu: the panel unfolds out of the tool bar (OPEN_GROW s), while its sections cascade in
+// from the top (each starts OPEN_STAGGER of the run later than the one above, and settles in OPEN_ITEM).
+const OPEN_SECONDS=0.55,OPEN_GROW=0.5,OPEN_STAGGER=0.45,OPEN_ITEM=0.5,OPEN_RISE=2.5,CLOSE_SECONDS=0.16;
+/** Overshoots a touch and settles: things pop into place rather than slide. */
+function easeOutBack(t:number):number {const c=1.4;return 1+(c+1)*Math.pow(t-1,3)+c*Math.pow(t-1,2);}
+function hex(v:number):vec4 {return new vec4(((v>>16)&255)/255,((v>>8)&255)/255,(v&255)/255,1);}
 /** WB/Kelvin dials fill their ring's hole with the color that Kelvin value represents. */
 function kelvinFill(kelvin:number):vec4 {
   const rgb=kelvinToRGB(kelvin);
@@ -119,9 +135,12 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   onClear = new Event<void>();
   onResetFloor = new Event<void>();
   onToggleOcclusion = new Event<void>();
-  private occlusionLabel:ElementContent=null;
-  /** Shows whether occlusion is on. */
-  setOcclusion(on:boolean):void {if(this.occlusionLabel)this.occlusionLabel.text=on?"Occlusion: On":"Occlusion: Off";}
+  /** The header's shoot pill was tapped: switch between photo and video. */
+  onToggleShootType = new Event<void>();
+  /** Shows whether occlusion is on (the hub's toggle switch). */
+  setOcclusion(on:boolean):void {this.occlusionOn=on;this.paintOcclusion();}
+  private occlusionOn=false;
+  private occlusionSwitch:{track:RoundedRectangle;knob:SceneObject}=null;
   onSaveLayout = new Event<void>();
   onLoadLayout = new Event<string>();
   onRenameLayout = new Event<string>();
@@ -134,7 +153,15 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   onRecover = new Event<void>();
   private sharedStatus:Text;
   private status: Text;
-  private selectionLabels: ElementContent[] = [];
+  /** The hub's tool tiles and placement segments, by tool kind (0-2 Create, 3-5 Position). */
+  /** While true, textRow/button draw in the hub's light style (the menu's sub-pages); otherwise the dark
+   * style used on markers and the camera monitor. */
+  private light=false;
+  private hubTools:{kind:number;paint:(selected:boolean)=>void}[]=[];
+  private shootPill:Text=null;
+  private clearLabel:Text=null;
+  private clearArmed=false;
+  private clearTimer:DelayedCallbackEvent=null;
   private selected = 0;
   private count = 0;
   private back:BackPlate;
@@ -158,6 +185,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   private forcedCollapsed=false;
   get isCollapsed():boolean { return this.collapsed; }
   private subjectPose=3;
+  private subjectIcon:Image|null=null;
   private badgeMaterial:Material=null;
 
   onAwake(): void {
@@ -172,61 +200,202 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const back = this.sceneObject.createComponent(BackPlate.getTypeName()) as BackPlate;
     this.back=back;
     back.style="simple";
-    // +5.5 each for the Reset Floor and Layouts/Moodboard rows (4.5 tall + the column's 1cm gap).
-    const height=(this.showSharedControls?50:42)+LOGO_HEIGHT+11;
-    this.expandedSize=new vec2(46,height);
+    const height=HUB_H;
+    this.expandedSize=new vec2(HUB_W,height);
     back.size = this.expandedSize;
-    back.onInitialized.add(()=>{this.style(back,PANEL_TINT,PANEL_RADIUS);});
+    back.onInitialized.add(()=>{
+      this.style(back,HUB_PAPER,PANEL_RADIUS+1);
+      const rect=(back as unknown as {roundedRectangle:RoundedRectangle}).roundedRectangle;
+      rect.border=true;rect.borderSize=0.25;rect.borderColor=HUB_ACCENT;
+    });
     const content = this.obj(this.sceneObject,"PaletteContent",new vec3(0,0,0.6));
-    const col = this.flex(content,FlexDirection.Column,46,height,1,2);
-    this.col=col;
-    this.headerRow(col);
-    this.status = this.textRow(col,"Camera ready  ·  0 placed",42,2,"Body");
-    const types = this.child(col,"Marker types",42,6);
-    const row = this.flex(types,FlexDirection.Row,42,6,1,0);
-    ["Camera","Light","Notepad"].forEach((label,i) => {
-      const result = this.button(row,label,13.3,6,ICONS[i],() => this.onSelect.invoke(i));
-      this.selectionLabels.push(result);
-    });
-    const actors=this.child(col,"Actor poses",42,5);
-    const actorRow=this.flex(actors,FlexDirection.Row,42,5,1,0);
-    ["Standing","Seated"].forEach((label,i)=>{
-      this.selectionLabels.push(this.button(actorRow,label,20.5,5,ACTOR_ICONS[i],()=>this.onSelect.invoke(i+3)));
-    });
-    // Hand mode: no asset to place, just lets existing markers be tapped/dragged without accidentally
-    // dropping a new one. Pushed to selectionLabels last so its array position still matches HAND_KIND.
-    const mode=this.child(col,"Mode",42,5);
-    const modeRow=this.flex(mode,FlexDirection.Row,42,5,1,0);
-    this.selectionLabels.push(this.button(modeRow,"Hand",42,5,HAND_ICON,()=>this.onSelect.invoke(HAND_KIND)));
-    const actions = this.child(col,"Actions",42,4.5);
-    const actionRow = this.flex(actions,FlexDirection.Row,42,4.5,1,0);
-    this.button(actionRow,"Undo Last",20.5,4.5,ICONS[3],()=>this.onUndo.invoke());
-    this.button(actionRow,"Clear All",20.5,4.5,ICONS[4],()=>this.onClear.invoke());
-    const floor=this.child(col,"Floor",42,4.5);
-    const floorRow=this.flex(floor,FlexDirection.Row,42,4.5,1,0);
-    this.button(floorRow,"Reset Floor",20.5,4.5,RESET_FLOOR_ICON,()=>this.onResetFloor.invoke());
-    // Occlusion: props hide behind real furniture. On by default; ScoutMain owns the state.
-    this.occlusionLabel=this.button(floorRow,"Occlusion: Off",20.5,4.5,OCCLUSION_ICON,()=>this.onToggleOcclusion.invoke());
-    const pages=this.child(col,"Pages",42,4.5);
-    const pagesRow=this.flex(pages,FlexDirection.Row,42,4.5,1,0);
-    this.button(pagesRow,"Saved Layouts",20.5,4.5,LAYOUTS_ICON,()=>this.showView("layouts"));
-    this.button(pagesRow,"Moodboard",20.5,4.5,MOODBOARD_ICON,()=>this.showView("moodboard"));
-    if(this.showSharedControls){
-    const shared=this.child(col,"Shared layout",42,4.5);
-    const sharedRow=this.flex(shared,FlexDirection.Row,42,4.5,.6,0);
-    this.button(sharedRow,"Connect",10,4.5,null,()=>this.onConnect.invoke());
-    this.button(sharedRow,"Invite",10,4.5,null,()=>this.onInvite.invoke());
-    this.button(sharedRow,"Save",10,4.5,null,()=>this.onSave.invoke());
-    this.button(sharedRow,"Recover",10,4.5,null,()=>this.onRecover.invoke());
-    this.sharedStatus=this.textRow(col,"Shared layout • connect to begin",42,2,"Caption");
-    }
-    this.textRow(col,"Tap the pencil on an asset to adjust it",42,2,"Caption");
+    this.col=this.buildHub(content);
     this.layoutsPanel=this.buildLayoutsPanel(content,height);
     this.moodboardPanel=this.buildMoodboardPanel(content,height);
     this.collapsedBar=this.buildCollapsedBar(content);
     this.buildCap(content);
     this.applyCollapsed();
     this.setState(this.selected,this.count);
+  }
+  // ─── The creative hub ────────────────────────────────────────────────────────────────────────────────
+  /** The expanded menu's main page, laid out top to bottom: brand header, then Create (the three placeable
+   * tools, most prominent), Position (Standing / Seated / Hand as one segmented control), Workspace (Saved
+   * Layouts, Moodboard) and Environment (small utility chips). Every control fires the same events the
+   * old button column did. */
+  private buildHub(parent:SceneObject):SceneObject {
+    const hub=this.obj(parent,"Hub",vec3.zero());
+    const L=-HUB_INNER/2,T=HUB_H/2;
+    // Header: small mascot, compact wordmark, shoot status; the live status line under it.
+    this.hubImage(hub,MASCOT,new vec3(L+3,T-6.2,0.2),8*MASCOT_ASPECT,8,HUB_WHITE);
+    this.hubImage(hub,LOGO,new vec3(L+6.8+8.7,T-6.2,0.2),17.4,8.2,HUB_PURPLE);
+    // The shoot pill doubles as a switch: tap it to change between a photo and a video shoot.
+    // (Every button sits in its own holder: the opening animation scales the holder, while the button's
+    // hover grows the button itself from its true size.)
+    const pill=this.obj(this.obj(hub,"Shoot holder",new vec3(HUB_INNER/2-9.5,T-6.2,0.2)),"Shoot",vec3.zero());
+    const pillBack=pill.createComponent(BackPlate.getTypeName()) as BackPlate;
+    pillBack.style="simple";pillBack.size=new vec2(19,5);
+    pillBack.onInitialized.add(()=>{
+      const rect=(pillBack as unknown as {roundedRectangle:RoundedRectangle}).roundedRectangle;
+      rect.gradient=false;rect.cornerRadius=2.4;rect.backgroundColor=HUB_PAPER_2;
+      rect.border=true;rect.borderSize=0.18;rect.borderColor=HUB_RULE;
+      pillBack.interactionPlane.enabled=false;
+      pillBack.interactable.onTriggerEnd.add(()=>{if(this.shootType)this.onToggleShootType.invoke();});
+      addBackPlateHover(pillBack,pill,HUB_PAPER_2);
+    });
+    this.hubRect(pill,new vec3(-7.6,0,0.3),1.3,1.3,HUB_PURPLE,0.65);
+    this.hubIcon(pill,SWAP_ICON,new vec3(7.2,0,0.3),3,HUB_PURPLE);
+    this.shootPill=this.hubText(pill,"Setting up",new vec3(-0.3,0,0.3),11.6,4,HUB_INK,HUB_T_CAPS,THEME_FONT,HorizontalAlignment.Center);
+    this.shootPill.horizontalOverflow=HorizontalOverflow.Shrink;
+    this.status=this.hubText(hub,"Camera ready  ·  0 placed",new vec3(L,T-12.6,0.2),HUB_INNER,4,HUB_INK,HUB_T_STATUS,HUB_SERIF,HorizontalAlignment.Left);
+    this.status.horizontalOverflow=HorizontalOverflow.Shrink;
+    this.hubRule(hub,T-15.4);
+    // 01 Create: the three tools.
+    this.hubSection(hub,"01","CREATE",T-18.2);
+    const tileW=(HUB_INNER-3)/3,tileH=11;
+    ["Camera","Light","Notepad"].forEach((label,i)=>{
+      this.hubTool(hub,label,ICONS[i],i,new vec3(L+tileW/2+i*(tileW+1.5),T-26,0.2),tileW,tileH,true);
+    });
+    // 02 Position: one segmented control.
+    this.hubSection(hub,"02","POSITION",T-34);
+    const segH=6.4,segW=(HUB_INNER-2)/3;
+    this.hubRect(hub,new vec3(0,T-39.6,0.1),HUB_INNER,segH+1.4,HUB_PAPER_2,(segH+1.4)/2);
+    // Segments are sized to their labels (Standing is the longest), so every label fits at the same size.
+    let segX=L+1;
+    ([["Standing",ACTOR_ICONS[0],3,1.18],["Seated",ACTOR_ICONS[1],4,1.0],["Hand",HAND_ICON,HAND_KIND,0.82]] as [string,Texture,number,number][]).forEach(([label,icon,kind,weight])=>{
+      const w=segW*weight;
+      this.hubTool(hub,label,icon,kind,new vec3(segX+w/2,T-39.6,0.2),w-0.8,segH,false);
+      segX+=w;
+    });
+    // 03 Workspace: quieter secondary tools.
+    this.hubSection(hub,"03","WORKSPACE",T-45.6);
+    const halfW=(HUB_INNER-1.5)/2;
+    this.hubRowButton(hub,"Saved Layouts",LAYOUTS_ICON,new vec3(L+halfW/2,T-51,0.2),halfW,6.4,HUB_PAPER_2,()=>this.showView("layouts"));
+    this.hubRowButton(hub,"Moodboard",MOODBOARD_ICON,new vec3(L+halfW*1.5+1.5,T-51,0.2),halfW,6.4,HUB_PAPER_2,()=>this.showView("moodboard"));
+    // 04 Environment: small utility chips, a 2x2 grid.
+    this.hubSection(hub,"04","ENVIRONMENT",T-56.6);
+    const chipH=4.8;
+    const occl=this.hubRowButton(hub,"Occlusion",OCCLUSION_ICON,new vec3(L+halfW/2,T-61.4,0.2),halfW,chipH,HUB_PAPER,()=>this.onToggleOcclusion.invoke(),true);
+    const sw=this.obj(occl,"Switch",new vec3(halfW/2-4,0,0.3));
+    const track=this.hubRect(sw,vec3.zero(),5.6,2.8,HUB_ACCENT,1.4);
+    const knob=this.obj(sw,"Knob",new vec3(-1.4,0,0.1));
+    this.hubRect(knob,vec3.zero(),2.2,2.2,HUB_WHITE,1.1);
+    this.occlusionSwitch={track,knob};this.paintOcclusion();
+    this.hubRowButton(hub,"Reset Floor",FLOOR_RESET_ICON,new vec3(L+halfW*1.5+1.5,T-61.4,0.2),halfW,chipH,HUB_PAPER,()=>this.onResetFloor.invoke(),true);
+    this.hubRowButton(hub,"Undo Last",ICONS[3],new vec3(L+halfW/2,T-66.6,0.2),halfW,chipH,HUB_PAPER,()=>this.onUndo.invoke(),true);
+    const clear=this.hubRowButton(hub,"Clear All",ICONS[4],new vec3(L+halfW*1.5+1.5,T-66.6,0.2),halfW,chipH,HUB_PAPER,()=>this.tapClear(),true);
+    this.clearLabel=clear.getChild(clear.getChildrenCount()-1).getComponent("Component.Text") as Text;
+    // A strip of film perforations along the bottom edge: a quiet analog detail.
+    for(let i=0;i<9;i++)this.hubRect(hub,new vec3(-HUB_W/2+9+i*4.4,-T+0.9,0.15),2,0.9,HUB_RULE,0.3);
+    return hub;
+  }
+  /** Clear All asks for a second tap within a few seconds before it actually clears. */
+  private tapClear():void {
+    if(this.clearArmed){
+      this.clearArmed=false;this.paintClear();
+      this.onClear.invoke();
+      return;
+    }
+    this.clearArmed=true;this.paintClear();
+    if(!this.clearTimer){
+      this.clearTimer=this.createEvent("DelayedCallbackEvent");
+      this.clearTimer.bind(()=>{this.clearArmed=false;this.paintClear();});
+    }
+    this.clearTimer.reset(CLEAR_CONFIRM_SECONDS);
+  }
+  private paintClear():void {
+    if(!this.clearLabel||isNull(this.clearLabel))return;
+    this.clearLabel.text=this.clearArmed?"Tap to confirm":"Clear All";
+    this.clearLabel.textFill.color=this.clearArmed?new vec4(0.78,0.25,0.3,1):HUB_INK;
+  }
+  private paintOcclusion():void {
+    const s=this.occlusionSwitch;
+    if(!s||isNull(s.knob))return;
+    s.track.backgroundColor=this.occlusionOn?HUB_PURPLE:HUB_ACCENT;
+    s.knob.getTransform().setLocalPosition(new vec3(this.occlusionOn?1.4:-1.4,0,0.1));
+  }
+  /** "01 CREATE": a purple serif number and tracked caps, starting at the left margin. */
+  private hubSection(parent:SceneObject,num:string,title:string,y:number):void {
+    const L=-HUB_INNER/2;
+    this.hubText(parent,num,new vec3(L,y,0.2),4,3.4,HUB_PURPLE,HUB_T_CAPS,HUB_SERIF,HorizontalAlignment.Left);
+    const t=this.hubText(parent,title,new vec3(L+4.8,y,0.2),30,3.4,HUB_INK_SOFT,HUB_T_CAPS,THEME_FONT,HorizontalAlignment.Left);
+    t.letterSpacing=0.14;
+  }
+  /** A selectable tool: a tile (icon over title) for Create, or a segment (icon + label) for Position. */
+  private hubTool(parent:SceneObject,label:string,icon:Texture,kind:number,pos:vec3,w:number,h:number,tile:boolean):void {
+    const so=this.obj(this.obj(parent,label+" holder",pos),label,vec3.zero());
+    const idle=new vec4(0,0,0,0);
+    const base=tile?HUB_PAPER_2:HUB_PAPER_2;
+    idle.x=base.x;idle.y=base.y;idle.z=base.z;idle.w=1;
+    let rect:RoundedRectangle=null;
+    const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
+    back.style="simple";back.size=new vec2(w,h);
+    const img=this.hubIcon(so,icon,tile?new vec3(0,1.9,0.3):new vec3(-w/2+3.0,0,0.3),tile?4.6:3.4,HUB_PURPLE);
+    // Segment labels share one size that fits the longest ("Standing"), so none gets shrunk smaller than its siblings.
+    const text=tile?this.hubText(so,label,new vec3(0,-3.1,0.3),w-1,4,HUB_INK,HUB_T_TILE,THEME_FONT,HorizontalAlignment.Center)
+      :this.hubText(so,label,new vec3(-w/2+5.2,0,0.3),w-5.6,4,HUB_INK,HUB_T_SEG,THEME_FONT,HorizontalAlignment.Left);
+    text.horizontalOverflow=HorizontalOverflow.Shrink;
+    const paint=(selected:boolean)=>{
+      const c=selected?HUB_PURPLE:(tile?HUB_PAPER_2:HUB_PAPER_2);
+      idle.x=c.x;idle.y=c.y;idle.z=c.z;
+      if(rect)rect.backgroundColor=c;
+      text.textFill.color=selected?HUB_WHITE:HUB_INK;
+      img.mainPass.baseColor=selected?HUB_WHITE:HUB_PURPLE;
+    };
+    back.onInitialized.add(()=>{
+      rect=(back as unknown as {roundedRectangle:RoundedRectangle}).roundedRectangle;
+      rect.gradient=false;rect.cornerRadius=tile?2.4:h/2;rect.backgroundColor=idle;
+      back.interactionPlane.enabled=false;
+      back.interactable.onTriggerEnd.add(()=>this.onSelect.invoke(kind));
+      addBackPlateHover(back,so,idle);
+      paint(this.selected===kind);
+    });
+    this.hubTools.push({kind,paint});
+  }
+  /** A labelled button with a leading icon (Workspace rows and Environment chips). */
+  private hubRowButton(parent:SceneObject,label:string,icon:Texture,pos:vec3,w:number,h:number,color:vec4,onTap:()=>void,small=false):SceneObject {
+    const so=this.obj(this.obj(parent,label+" holder",pos),label,vec3.zero());
+    const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
+    back.style="simple";back.size=new vec2(w,h);
+    back.onInitialized.add(()=>{
+      const rect=(back as unknown as {roundedRectangle:RoundedRectangle}).roundedRectangle;
+      rect.gradient=false;rect.cornerRadius=small?h/2:2;rect.backgroundColor=color;
+      rect.border=true;rect.borderSize=0.18;rect.borderColor=HUB_RULE;
+      back.interactionPlane.enabled=false;
+      back.interactable.onTriggerEnd.add(()=>onTap());
+      addBackPlateHover(back,so,color);
+    });
+    this.hubIcon(so,icon,new vec3(-w/2+(small?3:3.6),0,0.3),small?3:3.6,HUB_PURPLE);
+    const t=this.hubText(so,label,new vec3(-w/2+(small?5.4:6.6),0,0.3),w-(small?(label==="Occlusion"?13:7):7.6),4,HUB_INK,HUB_T_SEG,THEME_FONT,HorizontalAlignment.Left);
+    t.horizontalOverflow=HorizontalOverflow.Shrink;
+    return so;
+  }
+  private hubRule(parent:SceneObject,y:number):void {this.hubRect(parent,new vec3(0,y,0.1),HUB_INNER,0.2,HUB_RULE,0);}
+  private hubRect(parent:SceneObject,pos:vec3,w:number,h:number,color:vec4,radius:number):RoundedRectangle {
+    const so=this.obj(parent,"Rect",pos);
+    const r=so.createComponent(RoundedRectangle.getTypeName()) as RoundedRectangle;
+    r.initialize();r.size=new vec2(w,h);r.cornerRadius=radius;r.gradient=false;r.backgroundColor=color;
+    return r;
+  }
+  private hubIcon(parent:SceneObject,tex:Texture,pos:vec3,size:number,tint:vec4):Image {
+    const so=this.obj(parent,"Icon",pos);
+    const img=so.createComponent("Component.Image") as Image;
+    img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();img.mainPass.baseTex=tex;img.mainPass.baseColor=tint;
+    so.getTransform().setLocalScale(new vec3(size,size,1));
+    return img;
+  }
+  private hubImage(parent:SceneObject,tex:Texture,pos:vec3,w:number,h:number,tint:vec4):void {
+    const img=this.hubIcon(parent,tex,pos,1,tint);
+    img.getSceneObject().getTransform().setLocalScale(new vec3(w,h,1));
+  }
+  private hubText(parent:SceneObject,value:string,pos:vec3,w:number,h:number,color:vec4,size:number,font:Font,align:HorizontalAlignment):Text {
+    const x=align===HorizontalAlignment.Left?pos.x+w/2:pos.x;
+    const so=this.obj(parent,"Text",new vec3(x,pos.y,pos.z));
+    const t=so.createComponent("Component.Text") as Text;
+    t.text=value;t.depthTest=true;t.font=font;t.size=size;t.textFill.color=color;
+    t.horizontalAlignment=align;t.verticalAlignment=VerticalAlignment.Center;
+    t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
+    t.layoutRect=Rect.create(-w/2,w/2,-h/2,h/2);
+    return t;
   }
   /** Manually toggled by the cap. */
   /** Bench step (before a shoot type is picked): only the floating Reset Floor button shows — the tools
@@ -254,8 +423,54 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     this.collapsed=collapsed;
     this.applyView();
     this.collapsedBar.enabled=collapsed;
-    this.back.size=collapsed?COLLAPSED_SIZE:this.expandedSize;
-    this.updateCap();
+    if(this.panelAnim){this.panelAnim();this.panelAnim=null;}
+    // Opening from the bar (by hand) unfolds; head-motion auto-collapse and closing stay quick.
+    if(!collapsed&&!this.forcedCollapsed&&this.back)this.unfold();
+    else this.resizePanel(collapsed?COLLAPSED_SIZE:this.expandedSize,collapsed?CLOSE_SECONDS:0);
+  }
+  private panelAnim:CancelFunction=null;
+  private unfoldRest=new Map<SceneObject,{pos:vec3;scale:vec3}>();
+  /** Grows the panel to `to` over `seconds` (0 = at once), keeping the side tab on its edge. */
+  private resizePanel(to:vec2,seconds:number):void {
+    // The bench step keeps the panel shrunk away (see setFloorOnly); don't animate it back.
+    if(this.floorOnly){this.back.size=new vec2(0.01,0.01);this.updateCap();return}
+    const from=this.back.size;
+    if(seconds<=0){this.back.size=to;this.updateCap();return}
+    this.panelAnim=animate({duration:seconds,easing:"ease-out-cubic",update:t=>{
+      this.back.size=vec2.lerp(from,to,t);this.updateCap();
+    },ended:()=>{this.panelAnim=null;}});
+  }
+  /** The menu opening: the panel grows out of the tool bar, and the page's rows cascade in from the top
+   * — each rises a little and scales up into place just after the one above it. */
+  private unfold():void {
+    const from=COLLAPSED_SIZE,to=this.expandedSize;
+    const page=this.view==="main"?this.col:this.view==="layouts"?this.layoutsPanel:this.moodboardPanel;
+    // The main page's rows are its direct children; sub-pages animate as a whole.
+    const items:{t:Transform;pos:vec3;scale:vec3;delay:number}[]=[];
+    const nodes=this.view==="main"&&page?Array.from({length:page.getChildrenCount()},(_,i)=>page.getChild(i)):(page?[page]:[]);
+    for(const n of nodes){
+      // Resting placement, captured once — a reopen mid-animation would otherwise read a half-scaled row.
+      if(!this.unfoldRest.has(n))this.unfoldRest.set(n,{pos:n.getTransform().getLocalPosition(),scale:n.getTransform().getLocalScale()});
+      const rest=this.unfoldRest.get(n);
+      const t=n.getTransform(),pos=rest.pos;
+      const fromTop=Math.min(1,Math.max(0,(HUB_H/2-pos.y)/HUB_H));
+      items.push({t,pos,scale:rest.scale,delay:fromTop*OPEN_STAGGER});
+    }
+    const place=(p:number)=>{
+      for(const it of items){
+        const k=Math.min(1,Math.max(0,(p-it.delay)/OPEN_ITEM));
+        const e=k<=0?0:easeOutBack(k);
+        it.t.setLocalScale(it.scale.uniformScale(Math.max(0.0001,e)));
+        it.t.setLocalPosition(new vec3(it.pos.x,it.pos.y-(1-Math.min(1,e))*OPEN_RISE,it.pos.z));
+      }
+    };
+    place(0);
+    this.panelAnim=animate({duration:OPEN_SECONDS,update:p=>{
+      const g=Math.min(1,p/OPEN_GROW);
+      this.back.size=vec2.lerp(from,to,1-Math.pow(1-g,3));
+      this.updateCap();
+      place(p);
+    },ended:()=>{place(1.0001+OPEN_STAGGER);this.back.size=to;this.updateCap();this.panelAnim=null;}});
   }
   private showView(view:"main"|"layouts"|"moodboard"):void {
     this.view=view;this.applyView();
@@ -269,7 +484,8 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   }
   /** Saved Layouts page: save the current layout, then load / rename / delete saved ones. */
   private buildLayoutsPanel(parent:SceneObject,height:number):SceneObject {
-    const panel=this.flex(parent,FlexDirection.Column,46,height,1,2);
+    this.light=true;
+    const panel=this.flex(parent,FlexDirection.Column,HUB_W,height,1,2);
     this.textRow(panel,"Saved Layouts",42,5,"Title2");
     this.textRow(panel,"Layouts load around where you're standing",42,2,"Caption");
     const save=this.child(panel,"Save",42,5);
@@ -278,6 +494,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     this.layoutList=this.child(panel,"Layout list",42,LAYOUT_LIST_H);
     this.backRow(panel);
     this.renderLayoutList();
+    this.light=false;
     panel.enabled=false;
     return panel;
   }
@@ -293,6 +510,10 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   }
   private renderLayoutList():void {
     if(!this.layoutList)return;
+    const wasLight=this.light;this.light=true;
+    try{this.renderLayoutRows();}finally{this.light=wasLight;}
+  }
+  private renderLayoutRows():void {
     for(let i=this.layoutList.getChildrenCount()-1;i>=0;i--)this.layoutList.getChild(i).destroy();
     const list=this.flex(this.layoutList,FlexDirection.Column,42,LAYOUT_LIST_H,1,0);
     const flex=list.getComponent(FlexLayout.getTypeName()) as FlexLayout;
@@ -311,13 +532,14 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   }
   /** Moodboard page: phone pairing (shown, not live yet) and pinning a poster to a wall. */
   private buildMoodboardPanel(parent:SceneObject,height:number):SceneObject {
-    const panel=this.flex(parent,FlexDirection.Column,46,height,1,2);
+    this.light=true;
+    const panel=this.flex(parent,FlexDirection.Column,HUB_W,height,1,2);
     this.textRow(panel,"Moodboard",42,5,"Title2");
     this.textRow(panel,"Bring in reference images and notes",42,2.5,"Body");
     this.textRow(panel,"from Google Drive, Canva, Figma or your camera roll",42,2,"Caption");
     this.textRow(panel,"Open ShotScout Link on your phone and enter",42,2.5,"Caption");
     const code=this.textRow(panel,this.pairingCode(),42,9,"Title2");
-    code.size=200;code.textFill.color=this.accent;
+    code.size=200;code.textFill.color=HUB_PURPLE;code.font=HUB_SERIF;
     this.textRow(panel,"Not connected · phone pairing coming soon",42,2.5,"Caption");
     const pin=this.child(panel,"Pin",42,5);
     const pinRow=this.flex(pin,FlexDirection.Row,42,5,1,0);
@@ -325,6 +547,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       this.showView("main");this.setCollapsed(true);this.onPinPoster.invoke();
     });
     this.backRow(panel);
+    this.light=false;
     panel.enabled=false;
     return panel;
   }
@@ -360,12 +583,14 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const ring=this.selectedRing.createComponent(BackPlate.getTypeName()) as BackPlate;
     ring.style="simple";ring.size=new vec2(TOOLBAR_ICON+SELECTED_RING*2,TOOLBAR_ICON+SELECTED_RING*2);
     ring.onInitialized.add(()=>{
-      this.style(ring,SELECTED_TINT,TOOLBAR_ICON/2+SELECTED_RING);
+      this.style(ring,HUB_PURPLE,TOOLBAR_ICON/2+SELECTED_RING);
       ring.interactable.enabled=false;ring.interactionPlane.enabled=false;
     });
     tools.forEach(([icon,action],i)=>{
       const y=this.toolYs[i];
-      this.iconBadge(this.obj(bar,"Tool"+i,new vec3(0,y,0)),icon,TEXT_TINT,TOOLBAR_ICON,0,action);
+      const img=this.iconBadge(this.obj(bar,"Tool"+i,new vec3(0,y,0)),icon,HUB_PURPLE,TOOLBAR_ICON,0,action);
+      // The full-body dummy is tall and thin, so it gets a little more room than the square icons.
+      if(i===3){this.subjectIcon=img;this.paintSubjectIcon();img.getSceneObject().getTransform().setLocalScale(new vec3(TOOLBAR_ICON*0.75,TOOLBAR_ICON*0.75,1));}
     });
     this.buildFloorButton(bar,COLLAPSED_SIZE.y/2+FLOOR_GAP+FLOOR_BUTTON/2);
     bar.enabled=false;
@@ -378,16 +603,16 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
     back.style="simple";back.size=new vec2(FLOOR_BUTTON,FLOOR_BUTTON);
     back.onInitialized.add(()=>{
-      this.style(back,FLOOR_TINT,FLOOR_BUTTON/2);
+      this.style(back,HUB_PAPER,FLOOR_BUTTON/2);
       // Unlike the tool buttons it sits outside the panel, so it keeps its own interaction plane for
       // up-close pinches and pokes (the panel's plane doesn't reach it).
       back.interactable.onTriggerEnd.add(()=>this.onResetFloor.invoke());
-      addBackPlateHover(back,so,FLOOR_TINT);
+      addBackPlateHover(back,so,HUB_PAPER);
     });
     const iconHost=this.obj(so,"Icon",new vec3(0,0,0.5));
     const img=iconHost.createComponent("Component.Image") as Image;
     img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
-    img.mainPass.baseTex=FLOOR_RESET_ICON;img.mainPass.baseColor=TEXT_TINT;
+    img.mainPass.baseTex=FLOOR_RESET_ICON;img.mainPass.baseColor=HUB_PURPLE;
     iconHost.getTransform().setLocalScale(new vec3(FLOOR_BUTTON*0.62,FLOOR_BUTTON*0.62,1));
     this.label(bar,"Floor",new vec3(0,y+FLOOR_BUTTON/2+2,0.5),TYPE_SCALE.Body.size,TEXT_TINT,HorizontalAlignment.Center);
   }
@@ -399,35 +624,43 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     back.style="simple";
     back.size=new vec2(CAP_WIDTH,CAP_HEIGHT);
     back.onInitialized.add(()=>{
-      this.style(back,BUTTON_TINT,CAP_WIDTH/2);
+      this.style(back,HUB_PURPLE,CAP_WIDTH/2);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerStart.add(()=>this.setCollapsed(!this.collapsed));
-      addBackPlateHover(back,cap,BUTTON_TINT);
+      addBackPlateHover(back,cap,HUB_PURPLE);
     });
     const iconHost=this.obj(cap,"Icon",new vec3(0,0,0.5));
     const img=iconHost.createComponent("Component.Image") as Image;
     img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
-    img.mainPass.baseTex=ARROW_ICON;img.mainPass.baseColor=TEXT_TINT;
+    img.mainPass.baseTex=ARROW_ICON;img.mainPass.baseColor=HUB_WHITE;
     iconHost.getTransform().setLocalScale(new vec3(4,4,1));
     this.capIcon=img;
     this.updateCap();
   }
   private updateCap():void {
     if(!this.cap)return;
-    const size=this.collapsed?COLLAPSED_SIZE:this.expandedSize;
+    const size=this.back?this.back.size:(this.collapsed?COLLAPSED_SIZE:this.expandedSize);
     this.cap.getTransform().setLocalPosition(new vec3(size.x/2+CAP_WIDTH/2-1.5,0,0.3));
     if(this.capIcon)this.capIcon.rotationAngle=this.collapsed?-90:90;
   }
   setState(selected:number,count:number): void {
     this.selected=selected; this.count=count;
+    // Picking Standing or Seated anywhere (hub or bar) makes it the bar's Subject pose, and the bar's icon shows it.
+    if(selected===3||selected===4){this.subjectPose=selected;this.paintSubjectIcon();}
     // Bar slots: Camera, Light, Note, Subject (standing or seated), Hand.
     const slot=selected===HAND_KIND?4:selected>=3?3:selected;
     if(this.selectedRing&&this.toolYs[slot]!==undefined)this.selectedRing.getTransform().setLocalPosition(new vec3(0,this.toolYs[slot],-0.01));
-    const shoot=this.shootType==="photo"?"Photo shoot  ·  ":this.shootType==="video"?"Video shoot  ·  ":"";
-    if (this.status) this.status.text=shoot+TOOL_NAMES[selected]+" ready  ·  "+count+" placed";
-    this.selectionLabels.forEach((label,i)=> {label.text=(i===selected?"• ":"")+TOOL_NAMES[i]});
+    if (this.status) this.status.text=TOOL_NAMES[selected]+" ready  ·  "+count+" placed";
+    this.hubTools.forEach(t=>t.paint(t.kind===selected));
   }
-  setShootType(type:"photo"|"video"):void { this.shootType=type; this.setState(this.selected,this.count); }
+  private paintSubjectIcon():void {
+    if(this.subjectIcon)this.subjectIcon.mainPass.baseTex=ACTOR_ICONS[this.subjectPose===4?1:0];
+  }
+  setShootType(type:"photo"|"video"):void {
+    this.shootType=type;
+    if(this.shootPill)this.shootPill.text=type==="photo"?"Photo shoot":"Video shoot";
+    this.setState(this.selected,this.count);
+  }
   setSharedStatus(text:string):void {if(this.sharedStatus)this.sharedStatus.text=text;}
   setHint(hint:string):void { if(this.status) this.status.text=hint; }
 
@@ -698,21 +931,22 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     iconHost.getTransform().setLocalScale(new vec3(size*0.55,size*0.55,1));
   }
   /** Flat round badge with a centered icon; used for the collapsed toolbar's tool icons. */
-  private iconBadge(so:SceneObject,icon:Texture,tint:vec4,size:number,rotation:number,onTap:()=>void):void {
+  private iconBadge(so:SceneObject,icon:Texture,tint:vec4,size:number,rotation:number,onTap:()=>void):Image {
     const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
     back.style="simple";
     back.size=new vec2(size,size);
     back.onInitialized.add(()=>{
-      this.style(back,BUTTON_TINT,size/2);
+      this.style(back,HUB_PAPER_2,size/2);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerStart.add(()=>onTap());
-      addBackPlateHover(back,so,BUTTON_TINT);
+      addBackPlateHover(back,so,HUB_PAPER_2);
     });
     const iconHost=this.obj(so,"Icon",new vec3(0,0,0.5));
     const img=iconHost.createComponent("Component.Image") as Image;
     img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();
     img.mainPass.baseTex=icon;img.mainPass.baseColor=tint;img.rotationAngle=rotation;
     iconHost.getTransform().setLocalScale(new vec3(size*0.6,size*0.6,1));
+    return img;
   }
   private style(back:BackPlate,color:vec4,radius:number):void {
     const rect=(back as unknown as {roundedRectangle:{gradient:boolean;backgroundColor:vec4;cornerRadius:number}}).roundedRectangle;
@@ -741,6 +975,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   private textRow(parent:SceneObject,value:string,w:number,h:number,role:keyof typeof TYPE_SCALE):Text {
     const so=this.child(parent,value,w,h);const t=so.createComponent("Component.Text") as Text;
     t.text=value;t.depthTest=true;applyTextRole(t,role);
+    if(this.light){t.textFill.color=HUB_INK;if(role==="Title2"){t.font=HUB_SERIF;t.size=HUB_T_TITLE;}else t.size=Math.max(t.size,HUB_T_CAPS);}
     t.horizontalAlignment=HorizontalAlignment.Center;t.verticalAlignment=VerticalAlignment.Center;
     t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
     t.layoutRect=Rect.create(-w/2,w/2,-h/2,h/2);return t;
@@ -752,12 +987,23 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
     back.style="simple";
     back.size=new vec2(w,h);
+    const light=this.light,bg=light?HUB_PAPER_2:BUTTON_TINT,fg=light?HUB_INK:TEXT_TINT;
     back.onInitialized.add(()=>{
-      this.style(back,BUTTON_TINT,BUTTON_RADIUS);
+      this.style(back,bg,light?h/2:BUTTON_RADIUS);
       back.interactionPlane.enabled=false;
       back.interactable.onTriggerEnd.add(()=>action());
-      addBackPlateHover(back,so,BUTTON_TINT);
+      addBackPlateHover(back,so,bg);
     });
+    if(light){
+      // The hub's light pages draw their own label: UIKit's content re-tints its text after us.
+      const hasLabel=!!label,hasIcon=!!icon;
+      if(hasIcon)this.hubIcon(so,icon,new vec3(hasLabel?-w/2+3.4:0,0,0.4),Math.min(3.4,h*0.7),HUB_PURPLE);
+      if(hasLabel){
+        const t=this.hubText(so,label,new vec3(hasIcon?2:0,0,0.4),w-(hasIcon?8:3),h,HUB_INK,HUB_T_CAPS+14,THEME_FONT,HorizontalAlignment.Center);
+        t.horizontalOverflow=HorizontalOverflow.Shrink;
+      }
+      return null;
+    }
     const ec=so.createComponent(ElementContent.getTypeName()) as ElementContent;
     ec.sizeOverride=new vec2(w,h);
     ec.text=label;ec.textSize=TYPE_SCALE.Body.size;ec.leadingIcon=icon;ec.spacing=0.65;
@@ -767,9 +1013,9 @@ export class ScoutPaletteUI extends BaseScriptComponent {
     // above) guarantees this runs once the Text node actually exists, instead of racing a fixed delay.
     back.onInitialized.add(()=>{
       const apply=(node:SceneObject)=>{
-        node.getComponents("Component.Text").forEach(t=>{const tt=t as Text;tt.font=THEME_FONT;tt.textFill.color=TEXT_TINT;});
+        node.getComponents("Component.Text").forEach(t=>{const tt=t as Text;tt.font=THEME_FONT;tt.textFill.color=fg;if(light)tt.size=Math.max(tt.size,HUB_T_CAPS+10);});
         const img=node.getComponent("Component.Image") as Image;
-        if(img)img.mainPass.baseColor=TEXT_TINT;
+        if(img)img.mainPass.baseColor=light?HUB_PURPLE:TEXT_TINT;
         for(let i=0;i<node.getChildrenCount();i++)apply(node.getChild(i));
       };apply(so);
     });
