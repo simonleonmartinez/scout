@@ -443,6 +443,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.updateHeightSliders();
     this.updateDummies();
     this.updateNotes();
+    this.workbench.update();
     const all=InteractionManager.getInstance().getInteractorsByType(InteractorInputType.All);
     all.forEach(interactor=>{
       if(this.interactors.indexOf(interactor)>=0)return;

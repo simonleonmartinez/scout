@@ -4,7 +4,7 @@ import {BaseHand} from "InteractionKit.lspkg/Providers/HandInputData/BaseHand";
 // Fist detection from hand keypoints: how far the middle/ring/pinky tips sit from the wrist, as a
 // fraction of their knuckles' distance. Measured in the preview: fist ~0.8, pinch ~1.67, relaxed
 // ~1.8, open palm ~1.9. A gap between the two thresholds keeps a half-closed hand from flickering.
-const FIST_ON=1.05,FIST_OFF=1.3;
+export const FIST_ON=1.05,FIST_OFF=1.3;
 // A pinch whose other fingers are curled this far is a fist closing, not a deliberate pinch.
 export const PINCH_IS_FIST=1.25;
 // How quickly the tracked hand point is smoothed (per second) — hand keypoints jitter.

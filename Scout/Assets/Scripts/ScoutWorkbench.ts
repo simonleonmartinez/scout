@@ -3,6 +3,7 @@ import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interact
 import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {addHoverFeedback} from "./ScoutHover";
 import {addBox,buildLathe} from "./ScoutMarkerMesh";
+import {ScoutThrowables} from "./ScoutThrowables";
 
 export type ShootType="photo"|"video";
 /** Optional generated gear models, each placed in its own slot on the bench top. */
@@ -67,6 +68,8 @@ const PHOTO_COLOR=new vec4(1,0.66,0.25,1);
 const VIDEO_COLOR=new vec4(0.92,0.2,0.16,1);
 const GLOW_IDLE=0.2,GLOW_HOVER=0.8;
 const HIDE_SECONDS=0.35;
+// Pieces of the generated bench's mesh (its OBJ groups) that can be picked up and thrown — an easter egg.
+const THROWABLE=["CinemaCamera","PhotoCamera","Drone"];
 
 /** First-run "What are you planning?" bench: camera gear on a workbench and two physical buttons —
  * Photo Shoot / Video Shoot. Plain class driven by ScoutMain. */
@@ -75,7 +78,14 @@ export class ScoutWorkbench {
   private chosen=false;
   get active():boolean {return !!this.root&&!isNull(this.root)&&this.root.enabled&&!this.chosen;}
 
-  constructor(private material:Material,private camera:Camera,private gear:WorkbenchGear,private onChoose:(type:ShootType)=>void){}
+  private throwables:ScoutThrowables;
+  constructor(private material:Material,private camera:Camera,private gear:WorkbenchGear,private onChoose:(type:ShootType)=>void){
+    this.throwables=new ScoutThrowables(camera);
+  }
+  /** Call every frame: lets the throwable gear be grabbed and keeps thrown gear drifting. */
+  update():void {
+    if(this.root&&!isNull(this.root))this.throwables.update();
+  }
 
   /** Stands the bench on the floor in front of the user, facing them. With `startWithIntro`, the console
    * first pages through the intro cards and the Photo/Video buttons appear after the last one; either
@@ -212,6 +222,10 @@ export class ScoutWorkbench {
     if(this.gear.bench){
       const model=this.gear.bench.instantiate(this.root);
       model.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.up()));
+      for(const name of THROWABLE){
+        const mesh=findNamed(model,name);
+        if(mesh)this.throwables.add(mesh,this.root);
+      }
       return BENCH_TOP;
     }
     const b=this.builder(),ix:number[]=[];
@@ -392,4 +406,15 @@ export class ScoutWorkbench {
     t.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
     return t;
   }
+}
+
+/** The first object under `root` whose name contains `name` (imported names may carry a suffix). */
+function findNamed(root:SceneObject,name:string):SceneObject|null {
+  for(let i=0;i<root.getChildrenCount();i++){
+    const c=root.getChild(i);
+    if(c.name.indexOf(name)>=0&&c.getComponent("Component.RenderMeshVisual"))return c;
+    const deeper=findNamed(c,name);
+    if(deeper)return deeper;
+  }
+  return null;
 }
