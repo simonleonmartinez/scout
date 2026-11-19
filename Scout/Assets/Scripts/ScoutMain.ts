@@ -23,7 +23,7 @@ import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
 import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST,NearGrab} from "./ScoutGrabMove";
 import {ScoutRotaryDial} from "./ScoutRotaryDial";
 import {BaseHand} from "InteractionKit.lspkg/Providers/HandInputData/BaseHand";
-import {ScoutTips,ScoutToolkitCard,KitCard,IntroCard,Tip,introSeen,markIntroSeen,pillButton} from "./ScoutOnboarding";
+import {ScoutTips,ScoutToolkitCard,TourStep,IntroCard,Tip,introSeen,markIntroSeen,pillButton} from "./ScoutOnboarding";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
 import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
 import {BodyKind,CameraRig,HeightSlider,LightRig,RigPrefabs,TiltRig,TiltWheel,rigHeight} from "./ScoutCameraRig";
@@ -72,12 +72,16 @@ const INTRO_CARDS:IntroCard[]=[
   {title:"Save it for later.",body:"Come back with your crew and your plan is waiting where you left it."},
 ];
 // One-time tips, each shown the first time its action becomes useful (see the tips.show calls).
-// Toolkit card shown after the shoot type is picked on the bench.
-const KIT_TITLE="Place gear from your toolkit\nto organize your next shoot";
-const KIT_CARDS:KitCard[]=[
-  {label:"Camera",icon:requireAsset("../Icons/videocam.png") as Texture},
-  {label:"Light",icon:requireAsset("../Icons/lightbulb.png") as Texture},
-  {label:"Subject",icon:requireAsset("../Icons/dummy_face.png") as Texture},
+// The toolbar tour shown after the shoot type is picked on the bench: one stop per toolbar button, top
+// to bottom.
+const KIT_TITLE="Your toolkit";
+const TOUR_STEPS:TourStep[]=[
+  {title:"Camera",body:"Place a camera where it'll stand, then grab a reference shot from its angle."},
+  {title:"Light",body:"Add a key light and dial in its brightness and colour."},
+  {title:"Shot notes",body:"Pin a note to a spot: shot number, framing, movement and your own notes."},
+  {title:"Subject",body:"Place a stand-in actor and pose it. Tap again to switch standing and seated."},
+  {title:"Hand",body:"Nothing to place: point, pinch and grab what's already here."},
+  {title:"Reset the floor",body:"Floor looks off, or moved rooms? Reset it at any time from here."},
 ];
 // Lets the bench clear away first (s).
 const KIT_DELAY=0.6;
@@ -147,7 +151,7 @@ const LIGHT_SLIDER_Y=18;
 // How close (cm) a closed hand must be to a prop (or a rig's head) to take hold of it without pointing.
 const NEAR_REACH=6;
 // The bench ghost's turn ring on the floor: radius and band width (cm), and how many hit boxes make it up.
-const GHOST_RING_RADIUS=110,GHOST_RING_WIDTH=8,GHOST_RING_HITS=32;
+const GHOST_RING_RADIUS=88,GHOST_RING_WIDTH=8,GHOST_RING_HITS=32;
 // The ghost's Place button floats this far (cm) above the floor, over the bench's top shelf.
 const BENCH_PLACE_UI_Y=150;
 // The bench ghost stays this far (cm) from the user: never on top of them, never across the room.
@@ -157,6 +161,8 @@ const CAPTURE_CLEAR_RADIUS=150;
 // The edit badge: a pencil, or a check while its prop is being edited.
 const EDIT_BADGE_ICON=requireAsset("../Icons/edit.png") as Texture;
 const DONE_ICON=requireAsset("../Icons/check.png") as Texture;
+// How far (cm) a placement message floats above the top of the prop preview it's about.
+const HINT_ABOVE_PREVIEW=10;
 // A placement hit counts as floor within this far (cm) of the confirmed floor height.
 const FLOOR_MATCH=12;
 const SETTLE_RAY_ABOVE=20;
@@ -795,7 +801,13 @@ export class ScoutMain extends BaseScriptComponent {
       this.spinner.getTransform().setWorldRotation(facing.multiply(quat.angleAxis(-getTime()*SPINNER_SPEED,vec3.forward())));
       this.hintText.text=p?"Finding the floor…":this.floorHint(ray);
     }
-    this.hint.getTransform().setWorldPosition(anchor.add(new vec3(0,SPINNER_RADIUS+6,0)));
+    // Above the prop preview when one is standing there, so the message isn't hidden inside it.
+    let lift=SPINNER_RADIUS+6;
+    if(this.placementPreview.enabled){
+      const box=worldBounds(this.placementPreview);
+      if(box)lift=Math.max(lift,box.max.y-anchor.y+HINT_ABOVE_PREVIEW);
+    }
+    this.hint.getTransform().setWorldPosition(anchor.add(new vec3(0,lift,0)));
     this.hint.getTransform().setWorldRotation(facing);
   }
   /** A three-quarter ring whose brightness fades toward its tail — on an additive display the dim end
@@ -1679,7 +1691,8 @@ export class ScoutMain extends BaseScriptComponent {
     this.tips.done(this.kinds[idx]===3||this.kinds[idx]===4?"pose":"edit");
     if(this.gizmo.isEditing(root)){this.gizmo.select(null);this.editing=null;return}
     this.editing=root;
-    const allowVertical=this.kinds[idx]===3||this.kinds[idx]===4;
+    // No up/down handle: everything stands on the floor (subjects included).
+    const allowVertical=false;
     // The gizmo clamps the root, so translate "lowest point on the floor" into a minimum root height.
     const floor=this.floorY===null?this.groundY[idx]:this.floorY;
     const minRootY=root.getTransform().getWorldPosition().y-this.bottomOf(root)+floor;
@@ -1722,7 +1735,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.palette.setShootType(type);this.placeAudio.play(1);
     // The camera ghost shows this shoot's rig.
     this.rebuildPreview();
-    if(fromBench)this.schedule(KIT_DELAY,()=>this.toolkitCard.show(KIT_TITLE,KIT_CARDS,()=>this.palette&&!isNull(this.palette.sceneObject)&&this.palette.sceneObject.enabled?this.palette.sceneObject:null));
+    if(fromBench)this.schedule(KIT_DELAY,()=>this.toolkitCard.show(KIT_TITLE,TOUR_STEPS,i=>this.palette&&!isNull(this.palette.sceneObject)&&this.palette.sceneObject.enabled?this.palette.toolAnchor(i):null));
     this.tips.show("place");
     console.log("Scout shoot type: "+type);
   }

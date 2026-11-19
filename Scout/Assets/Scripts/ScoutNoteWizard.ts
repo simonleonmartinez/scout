@@ -1,3 +1,4 @@
+import {TargetingPriority} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {addBackPlateHover} from "./ScoutHover";
 import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
@@ -258,6 +259,7 @@ export class ScoutNoteWizard {
     void back;
   }
   private openKeyboard():void {
+    console.log("Scout note: opening keyboard");
     try{
       require("LensStudio:TextInputModule");
       const options=new TextInputSystem.KeyboardOptions();
@@ -275,6 +277,7 @@ export class ScoutNoteWizard {
       };
       options.onReturnKeyPressed=()=>global.textInputSystem.dismissKeyboard();
       options.onError=(_c:number,d:string)=>console.warn("Scout note keyboard: "+d);
+      options.onKeyboardStateChanged=(open:boolean)=>console.log("Scout note keyboard "+(open?"open":"closed"));
       global.textInputSystem.requestKeyboard(options);
     }catch(e){console.warn("Scout note keyboard unavailable: "+e);}
   }
@@ -373,6 +376,8 @@ export class ScoutNoteWizard {
       const rect=(back as unknown as {roundedRectangle:RoundedRectangle}).roundedRectangle;
       rect.gradient=false;rect.backgroundColor=color;rect.cornerRadius=radius;
       back.interactionPlane.enabled=false;
+      // The note's buttons win a pinch over props behind the card, like the menu's and tips'.
+      back.interactable.targetingPriority=TargetingPriority.High;
       back.interactable.onTriggerEnd.add(()=>onTap());
       addBackPlateHover(back,so,color);
     });

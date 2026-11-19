@@ -182,7 +182,6 @@ export function image(so:SceneObject,tex:Texture,w:number,h:number,tint:vec4):vo
   img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();img.mainPass.baseTex=tex;img.mainPass.baseColor=tint;
 }
 const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
-const ARROW_ICON=requireAsset("../Icons/arrow_forward.png") as Texture;
 const CLOSE_NAME="Close",BUTTON_NAME="Button";
 const CLOSE_TINT=new vec4(0x3e/255,0x30/255,0x82/255,1);
 /** A small round × button (BackPlate circle with the close icon) that calls `onTap`. */
@@ -235,100 +234,102 @@ export function pillButton(parent:SceneObject,label:string,pos:vec3,w:number,h:n
 const KIT_DISTANCE=55,KIT_DROP=3,KIT_SCALE=0.27;
 // It follows the gaze (not just turning), a little quicker than tips, so it's never left behind.
 const KIT_FOLLOW=5;
-const KIT_W=86,KIT_H=58,KIT_TITLE=175,KIT_LABEL=150,KIT_CLOSE=12;
-const KIT_CARD_W=21,KIT_CARD_H=25,KIT_CARD_GAP=23,KIT_FAN=8,KIT_ICON=11;
-const KIT_CARD_TINT=new vec4(0x24/255,0x1c/255,0x48/255,1);
-const KIT_DEAL=0.22,KIT_STAGGER=0.12;
+const KIT_CLOSE=12;
 // How long the toolkit card stays (s) if not closed; beside the menu, the gap to it (cm at the card's
 // design distance) and the arrow's size and colour.
-const KIT_SECONDS=15,KIT_ANCHOR_GAP=2,KIT_ARROW=9;
-const KIT_ARROW_TINT=new vec4(0xc1/255,0xad/255,0xff/255,1);
+// The tour popover: size, notch, gap to the button (design cm), text sizes, follow rate.
+const TOUR_W=78,TOUR_H=36,TOUR_NOTCH=6,TOUR_REACH=5;
+const TOUR_TITLE=185,TOUR_BODY=135,TOUR_COUNT=115,TOUR_BTN_W=22,TOUR_BTN_TEXT=140,TOUR_FOLLOW=6;
+const TOUR_COUNT_TINT=new vec4(0xc1/255,0xad/255,0xff/255,0.8);
+// A muted lavender, not near-black: Specs' display adds light, so a dark panel (and its notch) barely shows.
+const TOUR_TINT=new vec4(0x3a/255,0x30/255,0x5e/255,1);
 export type KitCard={label:string;icon:Texture};
 
-/** "Place gear from your toolkit…" pop-up: a small fanned deck of the things that can be placed, with a ×
- * to close. It drifts with the view like a tip and closes itself once the user places something. */
+/** One stop on the toolbar tour: which tool, and what it's for. */
+export type TourStep={title:string;body:string};
+
+/** The toolbar tour shown after the shoot type is picked: a popover beside the menu whose pointer (a
+ * notch) aims at one toolbar button at a time, top to bottom, saying what it's for.
+ * Next steps through; × closes it at any point. While it's up nothing gets placed (ScoutMain). */
 export class ScoutToolkitCard {
   private root:SceneObject=null;
+  private content:SceneObject=null;
+  private caret:SceneObject=null;
+  private steps:TourStep[]=[];
+  private step=0;
+  private anchorFor:((i:number)=>SceneObject|null)|null=null;
   constructor(private camera:Camera,private schedule:(seconds:number,fn:()=>void)=>void){}
   get active():boolean {return !!this.root&&!isNull(this.root)&&this.root.enabled;}
-  private anchor:(()=>SceneObject|null)|null=null;
-  private until=0;
-  /** With `anchor` (the menu), the card sits beside it, on the side toward the middle of the view, with
-   * an arrow pointing at it; otherwise it floats ahead of the user. It closes on × or after KIT_SECONDS. */
-  show(title:string,cards:KitCard[],anchor:(()=>SceneObject|null)|null=null):void {
+  show(_title:string,steps:TourStep[],anchorFor:((i:number)=>SceneObject|null)|null=null):void {
     this.close();
-    this.anchor=anchor;this.until=getTime()+KIT_SECONDS;
-    const root=global.scene.createSceneObject("Toolkit card");
+    this.steps=steps;this.step=0;this.anchorFor=anchorFor;
+    const root=global.scene.createSceneObject("Toolbar tour");
     followGaze(root,this.camera,KIT_DISTANCE,KIT_DROP,KIT_FOLLOW,true);
     root.getTransform().setLocalScale(vec3.one().uniformScale(KIT_SCALE));
     root.createComponent("Component.Canvas");
-    panel(root,KIT_W,KIT_H,PANEL_TINT,4);
-    closeButton(child(root,CLOSE_NAME,new vec3(KIT_W/2-KIT_CLOSE/2-2,KIT_H/2-KIT_CLOSE/2-2,0.6)),()=>this.close(),KIT_CLOSE);
-    text(root,title,new vec3(0,KIT_H/2-13,0.5),KIT_W-2*KIT_CLOSE-6,16,KIT_TITLE,TITLE_INK);
-    // The deck: fanned out from the middle card, outer cards tipped and dropped a little.
-    const mid=(cards.length-1)/2;
-    cards.forEach((card,i)=>{
-      const k=i-mid;
-      const so=child(root,"Card "+card.label,new vec3(k*KIT_CARD_GAP,-9-Math.abs(k)*1.5,0.5+i*0.05));
-      const t=so.getTransform();
-      t.setLocalRotation(quat.angleAxis(-k*KIT_FAN*Math.PI/180,vec3.forward()));
-      panel(so,KIT_CARD_W,KIT_CARD_H,KIT_CARD_TINT,2.5);
-      image(child(so,"Icon",new vec3(0,3.5,0.3)),card.icon,KIT_ICON,KIT_ICON,TITLE_INK);
-      text(so,card.label,new vec3(0,-7.5,0.3),KIT_CARD_W-2,6,KIT_LABEL,BODY_INK);
-      // Dealt in one at a time.
-      t.setLocalScale(vec3.one().uniformScale(0.01));
-      this.schedule(0.15+i*KIT_STAGGER,()=>{
-        if(isNull(so))return;
-        animate({duration:KIT_DEAL,easing:"ease-out-back",update:p=>{if(!isNull(so))t.setLocalScale(vec3.one().uniformScale(Math.max(0.01,p)));}});
+    panel(root,TOUR_W,TOUR_H,TOUR_TINT,4);
+    // The notch: a turned square half tucked under the card's edge, on the side facing the button.
+    this.caret=child(root,"Notch",vec3.zero());
+    panel(this.caret,TOUR_NOTCH,TOUR_NOTCH,TOUR_TINT,1.2);
+    this.caret.getTransform().setLocalRotation(quat.angleAxis(Math.PI/4,vec3.forward()));
+    closeButton(child(root,CLOSE_NAME,new vec3(TOUR_W/2-KIT_CLOSE/2-2,TOUR_H/2-KIT_CLOSE/2-2,0.6)),()=>this.close(),KIT_CLOSE);
+    this.root=root;
+    this.buildStep();
+    this.place(true);
+  }
+  private buildStep():void {
+    if(this.content&&!isNull(this.content))this.content.destroy();
+    const c=child(this.root,"Step",vec3.zero());this.content=c;
+    const s=this.steps[this.step],last=this.step===this.steps.length-1;
+    const left=-TOUR_W/2+5,textW=TOUR_W-KIT_CLOSE-12;
+    const title=text(c,s.title,new vec3(left+textW/2,TOUR_H/2-8,0.5),textW,9,TOUR_TITLE,TITLE_INK);
+    title.horizontalAlignment=HorizontalAlignment.Left;
+    const body=text(c,s.body,new vec3(left+(TOUR_W-10)/2,TOUR_H/2-19,0.5),TOUR_W-10,12,TOUR_BODY,BODY_INK);
+    body.horizontalAlignment=HorizontalAlignment.Left;
+    const count=text(c,(this.step+1)+" of "+this.steps.length,new vec3(left+10,-TOUR_H/2+7,0.5),20,7,TOUR_COUNT,TOUR_COUNT_TINT);
+    count.horizontalAlignment=HorizontalAlignment.Left;
+    pillButton(c,last?"Got it":"Next",new vec3(TOUR_W/2-5-TOUR_BTN_W/2,-TOUR_H/2+7,0.5),TOUR_BTN_W,9,TOUR_BTN_TEXT,false,()=>{
+      // Swap a beat later, not inside the button's own tap.
+      this.schedule(0.05,()=>{
+        if(!this.active)return;
+        if(last){this.close();return}
+        this.step++;this.buildStep();
       });
     });
-    // The pointer: an arrow off the card's right edge, toward the menu.
-    const arrow=child(root,"Arrow",new vec3(KIT_W/2+KIT_ARROW/2+1.5,0,0.5));
-    image(arrow,ARROW_ICON,KIT_ARROW,KIT_ARROW,KIT_ARROW_TINT);
-    arrow.enabled=!!anchor;
-    this.arrow=arrow;
-    sweepColliders(root,this.schedule);
-    this.root=root;
-    this.placeBesideAnchor(true);
+    sweepColliders(this.root,this.schedule);
   }
-  private arrow:SceneObject=null;
-  /** Beside the menu, turned to face the user and scaled to stay the same size to the eye at its depth.
-   * Returns false (and leaves it alone) when there's no menu to sit beside. */
-  private placeBesideAnchor(snap:boolean):boolean {
-    const a=this.anchor?this.anchor():null;
-    if(!a||!this.root||isNull(this.root))return false;
-    const cam=this.camera.getTransform(),eye=cam.getWorldPosition();
-    const ap=a.getTransform().getWorldPosition();
-    const dist=Math.max(20,ap.distance(eye));
-    const k=dist/KIT_DISTANCE,halfW=KIT_W*KIT_SCALE*k/2;
-    // Toward the middle of the view from the menu (the menu usually sits off to one side).
-    const toMenu=ap.sub(eye),right=cam.right;
-    const side=toMenu.dot(right)>=0?-1:1;
-    const goal=ap.add(right.uniformScale(side*(halfW+KIT_ANCHOR_GAP*k+(KIT_ARROW+3)*KIT_SCALE*k)));
+  /** Beside the current step's toolbar button, level with it, on the side toward the middle of the view;
+   * turned to face the user and scaled to keep its size to the eye. Without the menu, it floats ahead. */
+  private place(snap:boolean):void {
+    const a=this.anchorFor?this.anchorFor(this.step):null;
+    if(!a){followGaze(this.root,this.camera,KIT_DISTANCE,KIT_DROP,KIT_FOLLOW,snap);this.showPointer(false);return}
+    const cam=this.camera.getTransform(),eye=cam.getWorldPosition(),ap=a.getTransform().getWorldPosition();
+    const k=Math.max(20,ap.distance(eye))/KIT_DISTANCE,s=KIT_SCALE*k;
+    const right=cam.right,side=ap.sub(eye).dot(right)>=0?-1:1;
+    const goal=ap.add(right.uniformScale(side*(TOUR_W/2+TOUR_NOTCH+TOUR_REACH)*s));
     const t=this.root.getTransform();
-    t.setWorldPosition(snap?goal:vec3.lerp(t.getWorldPosition(),goal,Math.min(1,getDeltaTime()*KIT_FOLLOW)));
+    t.setWorldPosition(snap?goal:vec3.lerp(t.getWorldPosition(),goal,Math.min(1,getDeltaTime()*TOUR_FOLLOW)));
     const look=eye.sub(t.getWorldPosition());
     if(look.length>1)t.setWorldRotation(quat.lookAt(look.normalize(),vec3.up()));
-    t.setWorldScale(vec3.one().uniformScale(KIT_SCALE*k));
-    // The arrow points from the card's edge toward the menu.
-    if(this.arrow&&!isNull(this.arrow)){
-      const at=this.arrow.getTransform();
-      at.setLocalPosition(new vec3(-side*(KIT_W/2+KIT_ARROW/2+1.5),0,0.5));
-      at.setLocalRotation(quat.angleAxis(side>0?Math.PI:0,vec3.forward()));
-    }
-    return true;
+    t.setWorldScale(vec3.one().uniformScale(s));
+    // Notch on the near edge, level with the button.
+    const local=t.getInvertedWorldTransform().multiplyPoint(ap);
+    const edgeX=-side*TOUR_W/2,y=Math.max(-TOUR_H/2+TOUR_NOTCH,Math.min(TOUR_H/2-TOUR_NOTCH,local.y));
+    this.caret.getTransform().setLocalPosition(new vec3(edgeX,y,-0.05));
+    this.showPointer(true);
+  }
+  private showPointer(on:boolean):void {
+    if(this.caret&&!isNull(this.caret))this.caret.enabled=on;
   }
   /** Hides it now and destroys it a moment later (never inside the × button's own callback). */
   close():void {
     const root=this.root;
-    this.root=null;
+    this.root=null;this.content=null;this.caret=null;
     if(!root||isNull(root))return;
     root.enabled=false;
     this.schedule(0.5,()=>{if(!isNull(root))root.destroy();});
   }
   update():void {
-    if(!this.active)return;
-    if(getTime()>this.until){this.close();return}
-    if(!this.placeBesideAnchor(false))followGaze(this.root,this.camera,KIT_DISTANCE,KIT_DROP,KIT_FOLLOW);
+    if(this.active)this.place(false);
   }
 }

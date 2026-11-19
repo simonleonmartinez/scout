@@ -138,6 +138,14 @@ export class ScoutPaletteUI extends BaseScriptComponent {
   /** The header's shoot pill was tapped: switch between photo and video. */
   onToggleShootType = new Event<void>();
   /** Shows whether occlusion is on (the hub's toggle switch). */
+  private toolObjs:SceneObject[]=[];
+  private floorButtonObj:SceneObject=null;
+  /** The toolbar's `index`th button (top to bottom), while the toolbar is showing — for the tour. One
+   * past the last tool is the Reset Floor button above the toolbar. */
+  toolAnchor(index:number):SceneObject|null {
+    const o=index<this.toolObjs.length?this.toolObjs[index]:this.floorButtonObj;
+    return o&&!isNull(o)&&o.isEnabledInHierarchy?o:null;
+  }
   setOcclusion(on:boolean):void {this.occlusionOn=on;this.paintOcclusion();}
   private occlusionOn=false;
   private occlusionSwitch:{track:RoundedRectangle;knob:SceneObject}=null;
@@ -588,9 +596,11 @@ export class ScoutPaletteUI extends BaseScriptComponent {
       this.style(ring,HUB_PURPLE,TOOLBAR_ICON/2+SELECTED_RING);
       ring.interactable.enabled=false;ring.interactionPlane.enabled=false;
     });
+    this.toolObjs=[];
     tools.forEach(([icon,action],i)=>{
       const y=this.toolYs[i];
-      const img=this.iconBadge(this.obj(bar,"Tool"+i,new vec3(0,y,0)),icon,HUB_PURPLE,TOOLBAR_ICON,0,action);
+      const toolObj=this.obj(bar,"Tool"+i,new vec3(0,y,0));this.toolObjs.push(toolObj);
+      const img=this.iconBadge(toolObj,icon,HUB_PURPLE,TOOLBAR_ICON,0,action);
       // The full-body dummy is tall and thin, so it gets a little more room than the square icons.
       if(i===3){this.subjectIcon=img;this.paintSubjectIcon();img.getSceneObject().getTransform().setLocalScale(new vec3(TOOLBAR_ICON*0.75,TOOLBAR_ICON*0.75,1));}
     });
@@ -602,6 +612,7 @@ export class ScoutPaletteUI extends BaseScriptComponent {
    * whenever the bar does). */
   private buildFloorButton(bar:SceneObject,y:number):void {
     const so=this.obj(bar,"Reset floor",new vec3(0,y,0));
+    this.floorButtonObj=so;
     const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
     back.style="simple";back.size=new vec2(FLOOR_BUTTON,FLOOR_BUTTON);
     back.onInitialized.add(()=>{
