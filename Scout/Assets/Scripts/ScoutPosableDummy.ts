@@ -98,7 +98,7 @@ export class PosableDummy {
       const visuals=collectVisuals(piece);
       for(const v of visuals){
         if(material)v.mainMaterial=material;
-        v.meshShadowMode=MeshShadowMode.Both;
+        v.meshShadowMode=MeshShadowMode.Caster;
       }
       this.visuals.push(...visuals);this.pieceVisuals.push(...visuals);
       // The joint ball belongs to the parent piece, so it stays put as a socket while the limb turns in it.
@@ -189,8 +189,9 @@ export class PosableDummy {
     const box=Shape.createBoxShape();box.size=hi.sub(lo).add(vec3.one().uniformScale(GRAB_PAD*2));col.shape=box;
     const input=grab.createComponent(Interactable.getTypeName()) as Interactable;
     input.targetingMode=3;input.enableInstantDrag=true;
-    // Wins over the dummy's own (bigger, enclosing) collider.
-    input.targetingPriority=TargetingPriority.High;
+    // Normal priority: the edit handles (arrows, ring) and the menu win over a limb behind them. The
+    // dummy's own enclosing hit box is switched off while posing (ScoutMain), so limbs aren't blocked.
+    input.targetingPriority=TargetingPriority.Normal;
     input.onTriggerStart.add(e=>{
       e.stopPropagation();
       if(this.drag)return;
@@ -275,7 +276,7 @@ export class PosableDummy {
     b.appendIndices(idx);
     const visual=so.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
     visual.mesh=b.getMesh();visual.mainMaterial=material;b.updateMesh();
-    visual.meshShadowMode=MeshShadowMode.Both;
+    visual.meshShadowMode=MeshShadowMode.Caster;
     this.visuals.push(visual);
     this.sleeves.push({builder:b,data,center,axis,node,angle:0});
   }
@@ -310,7 +311,7 @@ export class PosableDummy {
     b.appendIndices(idx);
     const visual=ball.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
     visual.mesh=b.getMesh();visual.mainMaterial=material;b.updateMesh();
-    visual.meshShadowMode=MeshShadowMode.Both;
+    visual.meshShadowMode=MeshShadowMode.Caster;
     this.visuals.push(visual);
   }
   private addDot(node:SceneObject,material:Material,at:vec3):void {

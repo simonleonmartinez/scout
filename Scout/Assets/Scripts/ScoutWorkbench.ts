@@ -1,5 +1,6 @@
 import animate from "InteractionKit.lspkg/Utils/animate";
 import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {TargetingMode} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {addHoverFeedback} from "./ScoutHover";
 import {addBox,buildLathe} from "./ScoutMarkerMesh";
@@ -53,6 +54,34 @@ const POP_SECONDS=0.25;
 // Info key beside the console: cap radius, gap from the console's side, and its "i" size.
 const INFO_RADIUS=3.2,INFO_GAP=3,INFO_GLYPH=150;
 
+/** The bench's footprint and height (cm), for the placement ghost: the generated model spans this. */
+export const BENCH_SIZE=new vec3(180,134,72);
+/** A see-through outline of the bench (edges, the work top and its footprint on the floor) — no gear or
+ * buttons — that the user moves into place before the real bench appears. Local +Z faces the user. */
+export function buildBenchGhost(material:Material):SceneObject {
+  const so=global.scene.createSceneObject("Workbench ghost");
+  const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
+  b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
+  const ix:number[]=[];let v=0;
+  const hx=BENCH_SIZE.x/2,hz=BENCH_SIZE.z/2,H=BENCH_SIZE.y,E=0.6;
+  const edge:[number,number,number,number]=[0.75,0.68,1,0.9],plane:[number,number,number,number]=[0.6,0.5,1,0.18];
+  // Vertical edges at the four corners, the frame at floor, work-top and top-shelf heights.
+  for(const sx of [-1,1])for(const sz of [-1,1])v=addBox(b,ix,sx*hx,H/2,sz*hz,E,H/2,E,edge,v);
+  for(const y of [0.5,BENCH_TOP,H]){
+    for(const sz of [-1,1])v=addBox(b,ix,0,y,sz*hz,hx,E,E,edge,v);
+    for(const sx of [-1,1])v=addBox(b,ix,sx*hx,y,0,E,E,hz,edge,v);
+  }
+  // Faint fills: the footprint on the floor and the work top.
+  v=addBox(b,ix,0,0.3,0,hx,0.2,hz,plane,v);
+  v=addBox(b,ix,0,BENCH_TOP,0,hx,0.2,hz,plane,v);
+  b.appendIndices(ix);
+  const mat=material.clone();
+  mat.mainPass.blendMode=BlendMode.Normal;mat.mainPass.depthWrite=false;
+  const visual=so.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+  visual.mesh=b.getMesh();visual.mainMaterial=mat;b.updateMesh();
+  return so;
+}
+
 export type BenchIntro={cards:{title:string;body:string}[];onDone:()=>void};
 // Styled as film-set kit to sit with the bench model: a matte-black road case (like the bench frame and
 // gear) with brushed-aluminium corner guards and trim (like its drawer pulls), on a gunmetal panel.
@@ -68,6 +97,9 @@ const PHOTO_COLOR=new vec4(1,0.66,0.25,1);
 const VIDEO_COLOR=new vec4(0.92,0.2,0.16,1);
 const GLOW_IDLE=0.2,GLOW_HOVER=0.8;
 const HIDE_SECONDS=0.35;
+// The bench's arrival when the user places it: grow time, glow-pool time and colour.
+const ARRIVE_GROW=0.6,ARRIVE_POOL=1.6;
+const MAGIC=new vec4(0xc1/255,0xad/255,0xff/255,1);
 // Pieces of the generated bench's mesh (its OBJ groups) that can be picked up and thrown — an easter egg.
 const THROWABLE=["CinemaCamera","PhotoCamera","Drone"];
 
@@ -91,7 +123,7 @@ export class ScoutWorkbench {
    * first pages through the intro cards and the Photo/Video buttons appear after the last one; either
    * way a small info key beside the console replays the intro. `spot` is where the user confirmed the
    * floor; the bench stands there (within BENCH_MIN/MAX_DISTANCE of the user), facing them. */
-  show(floorY:number,intro:BenchIntro,startWithIntro:boolean,spot:vec3=null):void {
+  show(floorY:number,intro:BenchIntro,startWithIntro:boolean,spot:vec3=null,exact=false,rotation:quat=null):void {
     if(this.root&&!isNull(this.root))this.root.destroy();
     this.chosen=false;
     const cam=this.camera.getTransform(),p=cam.getWorldPosition();
@@ -100,13 +132,14 @@ export class ScoutWorkbench {
     const toSpot=spot?new vec3(spot.x-p.x,0,spot.z-p.z):null;
     if(toSpot&&toSpot.length>1){
       f=toSpot.normalize();
-      dist=Math.min(BENCH_MAX_DISTANCE,Math.max(BENCH_MIN_DISTANCE,toSpot.length));
+      // `exact`: the user placed it there themselves (the ghost), so it goes exactly there.
+      dist=exact?toSpot.length:Math.min(BENCH_MAX_DISTANCE,Math.max(BENCH_MIN_DISTANCE,toSpot.length));
     }
     this.root=global.scene.createSceneObject("Workbench");
     const t=this.root.getTransform();
     t.setWorldPosition(new vec3(p.x+f.x*dist,floorY,p.z+f.z*dist));
     // Local +Z toward the user.
-    t.setWorldRotation(quat.angleAxis(Math.atan2(-f.x,-f.z),vec3.up()));
+    t.setWorldRotation(rotation??quat.angleAxis(Math.atan2(-f.x,-f.z),vec3.up()));
     const top=this.buildBench();
     this.buildGear(top);
     this.buildHeader(top,startWithIntro?WELCOME:QUESTION);
@@ -114,6 +147,32 @@ export class ScoutWorkbench {
     this.info=this.buildInfoKey(top,()=>this.replayIntro(panel,intro));
     if(startWithIntro)this.startIntro(panel,intro);
     else this.buildChoice(panel,false);
+    // Put there by the user from the ghost: it arrives with a little magic.
+    if(exact)this.arrive();
+  }
+  /** The bench springs up out of a soft lavender glow on the floor, which spreads and fades. One
+   * material for the whole effect; it's gone after ~2 s. */
+  private arrive():void {
+    const root=this.root,rt=root.getTransform();
+    rt.setLocalScale(vec3.one().uniformScale(0.001));
+    animate({duration:ARRIVE_GROW,easing:"ease-out-back",update:k=>{
+      if(!isNull(root))rt.setLocalScale(vec3.one().uniformScale(Math.max(0.001,k)));
+    }});
+    const fx=global.scene.createSceneObject("Workbench arrival");
+    fx.getTransform().setWorldPosition(rt.getWorldPosition());
+    fx.getTransform().setWorldRotation(rt.getWorldRotation());
+    // A soft lavender pool on the floor that blooms out past the bench and fades.
+    const pool=this.image(fx,GLOW,new vec3(0,0.8,0),1,1,new vec4(MAGIC.x,MAGIC.y,MAGIC.z,0.9));
+    pool.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
+    pool.mainPass.blendMode=BlendMode.Add;
+    const poolT=pool.getSceneObject().getTransform();
+    animate({duration:ARRIVE_POOL,easing:"ease-out-cubic",update:k=>{
+      if(isNull(fx))return;
+      const size=40+k*260;
+      poolT.setLocalScale(new vec3(size,size*0.55,1));
+      pool.mainPass.baseColor=new vec4(MAGIC.x,MAGIC.y,MAGIC.z,0.9*(1-k));
+    }});
+    animate({duration:ARRIVE_POOL+0.4,update:()=>{},ended:()=>{if(!isNull(fx))fx.destroy();}});
   }
   private header:Text=null;
   private choice:SceneObject[]=[];
@@ -192,7 +251,8 @@ export class ScoutWorkbench {
     const collider=cap.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();shape.size=new vec3(INFO_RADIUS*2+2,6,INFO_RADIUS*2+2);collider.shape=shape;
     const input=cap.createComponent(Interactable.getTypeName()) as Interactable;
-    input.targetingMode=3;
+    // Pinch from afar or up close, or press it with a fingertip like a real key (Poke).
+    input.targetingMode=TargetingMode.All;
     addHoverFeedback(input,cap);
     const press=(down:boolean)=>{
       const from=capT.getLocalPosition().y,to=down?-1:0;
@@ -318,7 +378,8 @@ export class ScoutWorkbench {
     const collider=cap.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();shape.size=new vec3(BEZEL_RADIUS*2,8,BEZEL_RADIUS*2);collider.shape=shape;
     const input=cap.createComponent(Interactable.getTypeName()) as Interactable;
-    input.targetingMode=3;
+    // Pinch from afar or up close, or press it with a fingertip like a real key (Poke).
+    input.targetingMode=TargetingMode.All;
     addHoverFeedback(input,cap,amount=>{
       halo.mainPass.baseColor=new vec4(color.x,color.y,color.z,GLOW_IDLE+(GLOW_HOVER-GLOW_IDLE)*amount);
     });

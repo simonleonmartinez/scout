@@ -1,4 +1,4 @@
-import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {Interactable,TargetingPriority} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {Interactor,TargetingMode} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 import {buildLathe} from "./ScoutMarkerMesh";
 import {RING_GLOW,RING_GLOW_TUBE,RING_GLOW_LINGER} from "./ScoutCameraRig";
@@ -8,7 +8,9 @@ const COLORS:[number,number,number,number][]=[[1,.15,.15,1],[.15,1,.3,1],[.2,.5,
 // The turn ring is pale see-through glass (like the height slider and tilt wheel) rather than bright green.
 const RING_GLASS:[number,number,number,number]=[1,1,1,0.35];
 const RING_TUBE=1.2;
-const RADIUS=55;
+// How close (cm) a closed hand must be to the ring to take hold of it.
+const HAND_REACH=12;
+const RADIUS=46; // the rotate wheel (cm); smaller keeps it inside the glasses' view
 /** One world-axis gizmo shared by all placements. SIK supplies mouse and hand input. */
 export class ScoutTransformGizmo {
   private root:SceneObject;
@@ -85,9 +87,34 @@ export class ScoutTransformGizmo {
       if(this.ringGlow.enabled!==on)this.ringGlow.enabled=on;
     }
   }
+  private hand:{origin:vec3;rotation:quat;previous:vec3;angle:number}=null;
+  /** A fist closing on the turn ring up close (`point` within reach of it) starts turning the target
+   * with the hand. Returns whether it caught the ring. */
+  handTurnBegin(point:vec3):boolean {
+    if(!this.root.enabled||!this.target||isNull(this.target)||this.drag)return false;
+    const t=this.target.getTransform(),origin=t.getWorldPosition(),d=point.sub(origin);
+    if(Math.abs(Math.hypot(d.x,d.z)-RADIUS)>HAND_REACH||Math.abs(d.y)>HAND_REACH)return false;
+    this.hand={origin,rotation:t.getWorldRotation(),previous:point,angle:0};
+    this.touched();
+    return true;
+  }
+  handTurnUpdate(point:vec3):void {
+    const h=this.hand;
+    if(!h||!this.target||isNull(this.target))return;
+    const a=h.previous.sub(h.origin),b=point.sub(h.origin);
+    const from=new vec3(a.x,0,a.z),to=new vec3(b.x,0,b.z);
+    if(from.length>1&&to.length>1){
+      h.angle+=Math.atan2(vec3.up().dot(from.cross(to)),from.dot(to));
+      this.target.getTransform().setWorldRotation(quat.angleAxis(h.angle,vec3.up()).multiply(h.rotation));
+    }
+    h.previous=point;this.touched();this.update();
+  }
+  handTurnEnd():void {this.hand=null;this.touched();}
   private bind(object:SceneObject,axis:vec3,rotate:boolean):void {
     const input=object.createComponent(Interactable.getTypeName()) as Interactable;
     input.targetingMode=3;input.enableInstantDrag=true;
+    // Drawn on top of everything, so they win the pinch too — not the posable limb behind an arrow.
+    input.targetingPriority=TargetingPriority.High;
     if(rotate){
       input.onHoverEnter.add(()=>{this.ringHoverAt=getTime();});
       input.onHoverUpdate.add(()=>{this.ringHoverAt=getTime();});

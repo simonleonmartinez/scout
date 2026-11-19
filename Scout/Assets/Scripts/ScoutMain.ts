@@ -1,3 +1,4 @@
+import {HandVisual,HandMeshType} from "InteractionKit.lspkg/Components/Interaction/HandVisual/HandVisual";
 import {ScoutTransformGizmo} from "./ScoutTransformGizmo";
 import {ScoutSharedSession} from "./ScoutSharedSession";
 import {parseLayout,ScoutLayout,MarkerRecord} from "./ScoutLayout";
@@ -5,22 +6,24 @@ import {ScoutPaletteUI} from "./ScoutPaletteUI";
 import {PosableDummy,DummyPose,DUMMY_PART_COUNT,SEATED_POSE} from "./ScoutPosableDummy";
 import {buildMarkerMesh, buildNoteGhost, NOTE_PIN_HEIGHT, NOTE_TIP_HEIGHT} from "./ScoutMarkerMesh";
 import type {ScoutNoteWizard, NoteReference} from "./ScoutNoteWizard";
-import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
-import {InteractableManipulation} from "InteractionKit.lspkg/Components/Interaction/InteractableManipulation/InteractableManipulation";
+import {Interactable,TargetingPriority} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
+import {InteractableManipulation,RotationAxis} from "InteractionKit.lspkg/Components/Interaction/InteractableManipulation/InteractableManipulation";
 import {InteractionManager} from "InteractionKit.lspkg/Core/InteractionManager/InteractionManager";
-import {Interactor,InteractorInputType} from "InteractionKit.lspkg/Core/Interactor/Interactor";
+import {Interactor,InteractorInputType,TargetingMode} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 
 import {HandInputData} from "InteractionKit.lspkg/Providers/HandInputData/HandInputData";
 import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {CameraAssetState, LightAssetState, NoteAssetState, defaultCameraState, defaultLightState, defaultNoteState, KELVIN_STOPS, INTENSITY_STOPS, kelvinToRGB} from "./ScoutAssetState";
-import {HOVER_GLOW,addHoverFeedback} from "./ScoutHover";
+import {HOVER_GLOW} from "./ScoutHover";
 import {ScoutFloorSetup} from "./ScoutFloorSetup";
 import {ScoutLayoutStore,MAX_SAVED_LAYOUTS} from "./ScoutLayoutStore";
 import {buildPoster,POSTER_WIDTH,POSTER_HEIGHT} from "./ScoutPoster";
-import {ScoutWorkbench,ShootType} from "./ScoutWorkbench";
+import {ScoutWorkbench,ShootType,buildBenchGhost,BENCH_SIZE} from "./ScoutWorkbench";
 import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
-import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST} from "./ScoutGrabMove";
-import {ScoutTips,ScoutToolkitCard,KitCard,IntroCard,Tip,introSeen,markIntroSeen} from "./ScoutOnboarding";
+import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST,NearGrab} from "./ScoutGrabMove";
+import {ScoutRotaryDial} from "./ScoutRotaryDial";
+import {BaseHand} from "InteractionKit.lspkg/Providers/HandInputData/BaseHand";
+import {ScoutTips,ScoutToolkitCard,KitCard,IntroCard,Tip,introSeen,markIntroSeen,pillButton} from "./ScoutOnboarding";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
 import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
 import {BodyKind,CameraRig,HeightSlider,LightRig,RigPrefabs,TiltRig,TiltWheel,rigHeight} from "./ScoutCameraRig";
@@ -123,7 +126,6 @@ function wrapAngle(a:number):number {
   return a;
 }
 // Hovered props grow by less than buttons do: on a person-sized model even 5% is clearly visible.
-const MARKER_HOVER_SCALE=1.05;
 // Voice naming: how long a pause ends the name, and a cap in case nothing is ever said.
 const VOICE_SILENCE_MS=1500,VOICE_TIMEOUT=10,VOICE_NAME_MAX=40;
 const GROUND_INDICATOR=requireAsset("../Icons/ground_indicator.png") as Texture;
@@ -139,9 +141,24 @@ const MODEL_HEIGHTS=[145,165,30,170,125];
 // Camera height slider, in the prop's user-facing frame: out toward the user, off to the side, and up
 // from the prop's mid-height origin so it sits around the camera body.
 const SLIDER_OUT=14,SLIDER_SIDE=30,SLIDER_Y=28;
-// Lights' sliders sit lower, beside the pole, clear of the wide softbox above.
-const LIGHT_SLIDER_Y=-6;
+// Lights' sliders sit beside the pole at about the camera's slider height (~1 m), below the softbox.
+const LIGHT_SLIDER_Y=18;
 // When a moved asset settles, the downward ray starts this far above its feet (cm).
+// How close (cm) a closed hand must be to a prop (or a rig's head) to take hold of it without pointing.
+const NEAR_REACH=6;
+// The bench ghost's turn ring on the floor: radius and band width (cm), and how many hit boxes make it up.
+const GHOST_RING_RADIUS=110,GHOST_RING_WIDTH=8,GHOST_RING_HITS=32;
+// The ghost's Place button floats this far (cm) above the floor, over the bench's top shelf.
+const BENCH_PLACE_UI_Y=150;
+// The bench ghost stays this far (cm) from the user: never on top of them, never across the room.
+const BENCH_GHOST_MIN=150,BENCH_GHOST_MAX=450;
+// Within this far (cm, across the floor) of a camera being walked to for a capture, the UI clears away.
+const CAPTURE_CLEAR_RADIUS=150;
+// The edit badge: a pencil, or a check while its prop is being edited.
+const EDIT_BADGE_ICON=requireAsset("../Icons/edit.png") as Texture;
+const DONE_ICON=requireAsset("../Icons/check.png") as Texture;
+// A placement hit counts as floor within this far (cm) of the confirmed floor height.
+const FLOOR_MATCH=12;
 const SETTLE_RAY_ABOVE=20;
 // Occlusion: the occluder renders first; its on/off setting is remembered per device.
 const OCCLUDER_RENDER_ORDER=-100,OCCLUSION_KEY="scout.occlusion";
@@ -156,7 +173,10 @@ const OCCLUDER_SINK=4;
 // band of the raw vertex data).
 const KEY_LIGHT_OFFSET=new vec3(0.0095,0.235,0.08);
 // "100%" baseline for the Light asset's Intensity dial — the light's original always-on brightness.
-const KEY_LIGHT_INTENSITY=1;
+const KEY_LIGHT_INTENSITY=3;
+// The key light's cone (degrees: full strength inside the inner, fading to nothing at the outer, like a
+// softbox) and how far (cm) its quadratic falloff reaches.
+const KEY_LIGHT_CONE_INNER=35,KEY_LIGHT_CONE_OUTER=70,KEY_LIGHT_RANGE=700;
 // Real key light stands are elevated and angled down toward the subject; without this the beam aims
 // dead level and sails clean over anyone shorter than the panel (measured ~32° miss against a seated
 // subject placed a stand's length away — comfortably outside any plausible spot cone). Tilting the
@@ -290,7 +310,10 @@ export class ScoutMain extends BaseScriptComponent {
   private dummies=new Map<SceneObject,PosableDummy>();
   /** Each dummy's height when it was built: its labels were laid out for that (see fitDummy). */
   private dummyBuiltHeight=new Map<SceneObject,number>();
-  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:TiltRig;wheel:TiltWheel;afterAim?:()=>void}[]=[];
+  /** Where each prop was (and the floor height) when keepAboveFloor last measured it. */
+  private floorSeen=new Map<SceneObject,{pos:vec3;floor:number}>();
+  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:TiltRig;wheel:TiltWheel;afterAim?:()=>void;
+    lift:()=>number;setLift:(cm:number)=>void;setTilt:(deg:number)=>void}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
   private toolkitCard:ScoutToolkitCard;
@@ -336,7 +359,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.buildHoverHalo();
     this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>this.confirmFloor(y));
     this.palette.onResetFloor.add(()=>this.resetFloor());
-    this.setupOcclusion();
+    this.setupOcclusion();this.enableHandOcclusion();
     this.palette.onToggleShootType.add(()=>{if(this.shootType)this.chooseShoot(this.shootType==="photo"?"video":"photo");});
     this.palette.onToggleOcclusion.add(()=>{this.lastAction=getTime();this.setOcclusion(!this.occlusionOn);this.selectAudio.play(1);});
     this.workbench=new ScoutWorkbench(this.markerMaterial,this.camera,{
@@ -344,6 +367,7 @@ export class ScoutMain extends BaseScriptComponent {
       clapperboard:this.clapperboardPrefab,filmReel:this.filmReelPrefab,photoCamera:this.photoCameraPrefab,
     },type=>this.chooseShoot(type,true));
     this.grabMove=new ScoutGrabMove(this.camera,{
+      near:(point,hand)=>this.nearGrab(point,hand),
       target:()=>{
         // The prop under the cursor — or the one there a moment ago, since the targeting ray drifts as
         // the hand closes. Not one being walked to for an angle capture or open in the gizmo.
@@ -443,6 +467,8 @@ export class ScoutMain extends BaseScriptComponent {
     this.updateHeightSliders();
     this.updateDummies();
     this.updateNotes();
+    this.updateEditBadges();
+    this.prioritizeMenu();
     this.workbench.update();
     const all=InteractionManager.getInstance().getInteractorsByType(InteractorInputType.All);
     all.forEach(interactor=>{
@@ -452,6 +478,9 @@ export class ScoutMain extends BaseScriptComponent {
         if(interactor.inputType===InteractorInputType.Mouse && !target && (this.selected!==HAND_KIND||this.pinningPoster) && getTime()-this.lastAction>0.25) this.placeAt(interactor);
       });
     });
+    // What the hand is pointing at, for the far fist grab and the floor halo — worked out here from the
+    // ray rather than from the cursor, since props don't catch the cursor.
+    this.hovered=this.lastRayFromHand?this.pickProp(this.lastRay):null;
     // Grab-to-move runs first, so a fist that closes this frame claims it before a pinch can place.
     if(this.hovered&&!isNull(this.hovered)){this.hoverSeen={root:this.hovered,time:getTime()};this.tips.show("grab");}
     this.grabMove.update();
@@ -470,10 +499,14 @@ export class ScoutMain extends BaseScriptComponent {
     const active=all.find(i=>i.isActive()&&i.isTargeting());
     // A lingering target on the palette itself (e.g. right after tapping a toolbar icon) shouldn't
     // suppress the placement guides — only a real scene object (a placed marker, a gizmo handle) should.
-    const blocking=active?.currentInteractable&&!this.isPaletteTarget(active.currentInteractable);
-    const canPlace=!blocking&&this.placed.length<this.maxMarkers&&this.selected!==HAND_KIND;
+    // Pointing at a prop blocks placing too (props don't catch the cursor any more, so check the ray).
+    const blocking=(active?.currentInteractable&&!this.isPaletteTarget(active.currentInteractable))||!!this.hovered;
+    // Nothing to place (and no preview following the aim) while the toolkit card is up: it's the first
+    // thing to read after the bench, and a prop ghost chasing the cursor would pull attention from it.
+    const canPlace=!blocking&&this.placed.length<this.maxMarkers&&this.selected!==HAND_KIND&&!this.toolkitCard.active;
     const ray=this.rayFor(active);
     const aim=this.positionFor(active);
+    this.lastRay=ray;this.lastAim=aim;this.lastRayFromHand=!!active;
     this.surfaceHitTest(ray,aim,point=>{
       if(!point)return;
       this.previewGroundY=point.y;this.previewPoint=point;this.previewHitTime=getTime();
@@ -483,11 +516,10 @@ export class ScoutMain extends BaseScriptComponent {
     // type is picked at the workbench. The bench only stands on a real floor height: after a skipped setup
     // it waits (with the "look at the floor" hint) until surface tracking first sees the floor.
     const benchWaiting=this.floorSetup.done&&this.shootType===null&&!this.workbenchShown;
-    if(benchWaiting&&this.floorY!==null){
-      // A first-time user pages through the intro on the bench console before the Photo/Video buttons.
-      this.workbenchShown=true;
-      this.workbench.show(this.floorY,{cards:INTRO_CARDS,onDone:()=>{markIntroSeen();this.lastAction=getTime();}},!introSeen(),this.floorSetup.spot);
-    }
+    // The bench is big and the room may be tight: the user first moves a see-through ghost of it into a
+    // clear spot and pinches to put it there (placeBench).
+    if(benchWaiting&&this.floorY!==null)this.updateBenchGhost();
+    else if(this.benchGhost&&!isNull(this.benchGhost))this.benchGhost.enabled=false;
     const settingUp=!this.floorSetup.done||(benchWaiting&&!this.workbenchShown)||this.workbench.active;
     // The toolkit card goes first; the "point and pinch" tip waits until it's closed.
     this.tips.held=this.roomOutline.active||this.angleCapture.guiding||this.toolkitCard.active;
@@ -499,11 +531,14 @@ export class ScoutMain extends BaseScriptComponent {
     // standing on a wrongly detected floor can be fixed straight away.
     const benchStep=this.floorSetup.done&&this.workbench.active;
     this.palette.setFloorOnly(benchStep);
-    const hideMenu=(settingUp&&!benchStep)||this.roomOutline.active||this.toolkitCard.active;
+    // The menu stays up beside the toolkit card, which points at it.
+    const hideMenu=(settingUp&&!benchStep)||this.roomOutline.active||this.captureClear;
     if(this.paletteShown===hideMenu){this.paletteShown=!hideMenu;this.palette.sceneObject.enabled=!hideMenu;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
-    this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim);
+    const hand=active&&active.inputType!==InteractorInputType.Mouse?active.startPoint:null;
+    this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim,hand);
     this.angleCapture.update();
+    this.updateCaptureClear();
     this.roomOutline.update();
     if(settingUp||this.pinningPoster||this.angleCapture.guiding||this.roomOutline.active){
       this.placementPreview.enabled=false;
@@ -590,6 +625,7 @@ export class ScoutMain extends BaseScriptComponent {
     // The old floor stays locked until the new one is confirmed (or setup is skipped, which keeps it),
     // so markers standing on it can be recognised and moved across in confirmFloor.
     this.gizmo.select(null);this.editing=null;
+    this.benchHeld=false;
     // A bench still waiting for a shoot type goes too; it's put back on the new floor once that's confirmed.
     if(this.workbench.active){this.workbench.dismiss();this.workbenchShown=false;}
     this.floorSetup.restart();
@@ -677,6 +713,11 @@ export class ScoutMain extends BaseScriptComponent {
       // A dummy mid-pose may swing through the floor (tipping it over by the hips); it settles on release.
       if(this.dummies.get(root)?.dragging)return;
       const floor=this.floorY===null?this.groundY[i]:this.floorY;
+      // Measuring a prop's lowest point walks all its meshes (a dummy has dozens), so it's only redone
+      // when the prop has moved, its pose changed or the floor did — not every frame.
+      const pos=root.getTransform().getWorldPosition(),seen=this.floorSeen.get(root);
+      if(seen&&seen.floor===floor&&seen.pos.distance(pos)<0.01)return;
+      this.floorSeen.set(root,{pos,floor});
       if(this.bottomOf(root)<floor-0.5){
         this.liftOnto(root,floor);
         if(this.editing===root)this.gizmo.update();
@@ -711,21 +752,22 @@ export class ScoutMain extends BaseScriptComponent {
       else fallback();
     });
   }
-  /** Resolves a queued pinch: places on the first flat hit, or on the known floor once the search window
-   * runs out, or — if no floor has ever been seen — cancels with a hint instead of dropping it midair. */
+  /** Resolves a queued pinch: places only where Specs actually sees floor under the aim. A flat hit at
+   * another height (a table, a seat) or no clear hit before the search window runs out cancels with a
+   * message instead of guessing — a prop dropped on the wrong surface is worse than none. */
   private updatePending():void {
     const p=this.pending;
     if(!p)return;
     this.surfaceHitTest(p.ray,p.aim,point=>{
       if(this.pending!==p||!point)return;
-      this.pending=null;
       this.noteSurface(point.y);
-      this.spawnMarker(p.kind,point);
+      if(this.floorY!==null&&Math.abs(point.y-this.floorY)>FLOOR_MATCH)return; // not floor: keep looking
+      this.pending=null;
+      this.spawnMarker(p.kind,this.floorY!==null?new vec3(point.x,this.floorY,point.z):point);
     });
     if(getTime()-p.started<PLACE_SEARCH_SECONDS)return;
     this.pending=null;
-    if(this.floorY!==null)this.spawnMarker(p.kind,this.onPlane(p.ray,p.aim,this.floorY));
-    else this.showHint(this.floorHint(p.ray));
+    this.showHint(this.floorY!==null?"Make sure there's enough floor space to place it":this.floorHint(p.ray));
   }
   private floorHint(ray:PointerRay):string {
     if(ray.dir.y<STEEP_POINTING)return "Step back so Specs can see the floor";
@@ -797,19 +839,19 @@ export class ScoutMain extends BaseScriptComponent {
     so.enabled=false;
     this.hoverHalo=so;this.hoverHaloImage=img;
   }
-  /** Pinch-drag moves props only with the Hand tool selected (see makeMarker). */
+  /** A pinch never drags a prop around: props move with their edit arrows or a fist grab only. */
   private applyDragMode():void {
-    this.placed.forEach(root=>{if(!isNull(root)&&root!==this.grabMove.holding)this.setCanDrag(root,this.selected===HAND_KIND);});
+    this.placed.forEach(root=>{if(!isNull(root))this.setCanDrag(root,false);});
   }
-  private setCanDrag(root:SceneObject,can:boolean):void {
+  private setCanDrag(root:SceneObject,_can:boolean):void {
     const m=root.getComponent(InteractableManipulation.getTypeName()) as InteractableManipulation;
-    if(m)m.setCanTranslate(can);
+    if(m)m.setCanTranslate(false);
   }
   private updateHoverHalo():void {
     // A held prop keeps its halo even when the closed hand's ray has drifted off it.
     const held=this.grabMove.holding;
-    const target=held?held:this.hovered&&!isNull(this.hovered)&&this.placed.indexOf(this.hovered)>=0?this.hovered:null;
-    if(!target)this.hovered=null;
+    // Only while a prop is actually held: pointing at one stays quiet.
+    const target=held;
     const goal=target?1:0;
     this.hoverLevel+=(goal-this.hoverLevel)*Math.min(1,getDeltaTime()*HOVER_HALO_EASE);
     if(this.hoverLevel<0.01&&!target){this.hoverHalo.enabled=false;return}
@@ -918,11 +960,16 @@ export class ScoutMain extends BaseScriptComponent {
       if(this.floorSetup.canSkip){this.lastAction=getTime();this.floorSetup.skip();}
       return;
     }
+    // A pinch while the bench ghost is up puts the bench there.
+    if(this.benchGhost&&!isNull(this.benchGhost)&&this.benchGhost.enabled){this.lastAction=getTime();this.benchHeld=true;this.placeAudio.play(1);return}
     // Nothing is placed before the bench (and its intro) is done: its own keys take pinches then.
     if(this.workbench.active||this.shootType===null)return;
+    if(this.toolkitCard.active)return;
     if(this.pinningPoster){this.pinPoster();return}
     if(this.placed.length>=this.maxMarkers){this.palette.setHint("Marker limit reached — Undo or Clear All");return}
     if(this.pending)return;
+    // A pinch aimed at an existing prop isn't a placement on the floor behind it.
+    if(this.hovered&&!isNull(this.hovered))return;
     this.lastAction=getTime();
     // Queued, not placed: updatePending waits (spinner showing) for a real surface under the aim point.
     this.pending={kind:this.selected,ray:this.rayFor(interactor),aim:this.positionFor(interactor),started:getTime()};
@@ -1031,7 +1078,8 @@ export class ScoutMain extends BaseScriptComponent {
     const slider=new HeightSlider(pivot,pos,this.camera,()=>rig.lift,apply,touched,cam?.body,pick);
     slider.root.getTransform().setLocalRotation(quat.lookAt(facing,vec3.up()));
     const afterAim=opts.savedTilt!==undefined?()=>tilt(opts.savedTilt):undefined;
-    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null,rig,wheel,afterAim});
+    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null,rig,wheel,afterAim,
+      lift:()=>rig.lift,setLift:apply,setTilt:tilt});
     apply(rig.lift);
   }
   /** One shared material for the tilt wheels (vertex-coloured, like the gizmo's handles). */
@@ -1059,6 +1107,268 @@ export class ScoutMain extends BaseScriptComponent {
     const state=this.angleCapture.isGuiding(rec)?"guiding":rec.captured?(rec.stale?"stale":"captured"):"empty";
     return {camera:rec.root.name,state,texture:rec.screen.image,capture:()=>{this.lastAction=getTime();this.tips.done("capture");this.angleCapture.start(rec);}};
   }
+  private lastRay:PointerRay={start:vec3.zero(),dir:vec3.forward()};
+  private lastRayFromHand=false;
+  private lastAim:vec3=vec3.zero();
+  private benchGhost:SceneObject=null;
+  private benchAim:vec3=null;
+  /** The see-through bench follows the floor spot the user points at, facing them, at least
+   * BENCH_GHOST_MIN away so it's never placed on top of them. */
+  /** The nearest placed prop whose box the ray passes through (not one open in edit mode), or null. */
+  private pickProp(ray:PointerRay):SceneObject|null {
+    if(!ray||!this.placed.length)return null;
+    let best:SceneObject=null,bestT=Infinity;
+    for(const root of this.placed){
+      if(isNull(root)||!root.enabled||this.gizmo.isEditing(root))continue;
+      const col=root.getComponent("Physics.ColliderComponent") as ColliderComponent;
+      const shape=col?col.shape as BoxShape:null;
+      if(!shape)continue;
+      const inv=root.getTransform().getInvertedWorldTransform();
+      const o=inv.multiplyPoint(ray.start),d=inv.multiplyDirection(ray.dir);
+      const h=shape.size.uniformScale(0.5);
+      let t0=-Infinity,t1=Infinity,hit=true;
+      for(const [oc,dc,hc] of [[o.x,d.x,h.x],[o.y,d.y,h.y],[o.z,d.z,h.z]]){
+        if(Math.abs(dc)<1e-6){if(Math.abs(oc)>hc){hit=false;break}continue}
+        let a=(-hc-oc)/dc,b=(hc-oc)/dc;if(a>b){const x=a;a=b;b=x;}
+        t0=Math.max(t0,a);t1=Math.min(t1,b);
+        if(t0>t1){hit=false;break}
+      }
+      if(!hit||t1<0)continue;
+      const t=Math.max(0,t0);
+      if(t<bestT){bestT=t;best=root;}
+    }
+    return best;
+  }
+  private benchHeld=false;
+  private benchPlaceUI:SceneObject=null;
+  /** The see-through bench, before it's put down. It follows the floor spot the user points at (at least
+   * BENCH_GHOST_MIN away, facing them) until a pinch on the floor sets it down, or the user takes hold of
+   * it. Then it's theirs to adjust: pinch and drag it with one hand to slide it across the floor, twist
+   * with two hands to turn it. The Place button above it confirms. */
+  private updateBenchGhost():void {
+    if(!this.benchGhost||isNull(this.benchGhost))this.buildGhostControls();
+    this.benchGhost.enabled=true;
+    const t=this.benchGhost.getTransform();
+    const cam=this.camera.getTransform(),head=cam.getWorldPosition();
+    if(!this.benchHeld){
+      const fresh=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH&&this.previewPoint&&Math.abs(this.previewPoint.y-this.floorY)<FLOOR_MATCH?this.previewPoint:null;
+      let spot=fresh?fresh:this.onPlane(this.lastRay,this.lastAim,this.floorY);
+      let flat=new vec3(spot.x-head.x,0,spot.z-head.z);
+      if(flat.length<1){const f=cam.forward.uniformScale(-1);flat=new vec3(f.x,0,f.z);}
+      const dist=Math.min(BENCH_GHOST_MAX,Math.max(BENCH_GHOST_MIN,flat.length)),dir=flat.normalize();
+      spot=new vec3(head.x+dir.x*dist,this.floorY,head.z+dir.z*dist);
+      this.benchAim=this.benchAim?vec3.lerp(this.benchAim,spot,Math.min(1,getDeltaTime()*12)):spot;
+      t.setWorldPosition(this.benchAim);
+      t.setWorldRotation(quat.angleAxis(Math.atan2(-dir.x,-dir.z),vec3.up()));
+      this.showHint("Pinch the floor to set the workbench down");
+    }else{
+      // Held: keep it standing on the floor and upright, whatever the hands did.
+      const p=t.getWorldPosition();
+      if(Math.abs(p.y-this.floorY)>0.01)t.setWorldPosition(new vec3(p.x,this.floorY,p.z));
+      const f=t.getWorldRotation().multiplyVec3(vec3.forward());
+      if(Math.abs(f.y)>0.001)t.setWorldRotation(quat.angleAxis(Math.atan2(f.x,f.z),vec3.up()));
+      this.benchAim=t.getWorldPosition();
+    }
+    // The Place button floats above the ghost, turned to face the user.
+    if(this.benchPlaceUI&&!isNull(this.benchPlaceUI)){
+      this.benchPlaceUI.enabled=this.benchHeld;
+      const ut=this.benchPlaceUI.getTransform(),up=ut.getWorldPosition();
+      ut.setWorldPosition(t.getWorldPosition().add(new vec3(0,BENCH_PLACE_UI_Y,0)));
+      ut.setWorldRotation(quat.angleAxis(Math.atan2(head.x-up.x,head.z-up.z),vec3.up()));
+    }
+  }
+  /** The ghost, made grabbable: one hand slides it over the floor, two hands turn it about vertical. */
+  private buildGhostControls():void {
+    const g=buildBenchGhost(this.markerMaterial);
+    this.benchGhost=g;
+    // The hit box is centred on the ghost's pivot, which is on the floor (so it turns about its middle):
+    // twice the bench's height covers it, and the half below the floor can't be reached anyway.
+    const hc=g.createComponent("Physics.ColliderComponent") as ColliderComponent;
+    const hb=Shape.createBoxShape();hb.size=new vec3(BENCH_SIZE.x,BENCH_SIZE.y*2,BENCH_SIZE.z);hc.shape=hb;
+    const input=g.createComponent(Interactable.getTypeName()) as Interactable;
+    input.targetingMode=3;input.allowMultipleInteractors=true;
+    const m=g.createComponent(InteractableManipulation.getTypeName()) as InteractableManipulation;
+    m.setCanScale(false);m.setCanTranslate(true);m.setCanRotate(true);
+    m.rotationAxis=RotationAxis.Y;m.enableYTranslation=false;
+    m.onManipulationStart.add(()=>{this.benchHeld=true;this.lastAction=getTime();});
+    this.buildGhostTurnRing(g);
+    // Place button, above the ghost.
+    const ui=global.scene.createSceneObject("Workbench place button");
+    ui.createComponent("Component.Canvas");
+    pillButton(ui,"Place workbench",vec3.zero(),44,11,170,false,()=>{this.lastAction=getTime();this.placeBench();});
+    ui.enabled=false;
+    this.benchPlaceUI=ui;
+  }
+  /** A clear, thick ring on the floor around the ghost: pinch it (near or far) and drag around it to turn
+   * the bench about its middle. Brightens under the cursor. */
+  private buildGhostTurnRing(g:SceneObject):void {
+    const mat=this.markerMaterial.clone();
+    mat.mainPass.blendMode=BlendMode.Normal;mat.mainPass.depthWrite=false;
+    const ring=global.scene.createSceneObject("Ghost turn ring");ring.setParent(g);
+    ring.getTransform().setLocalPosition(new vec3(0,0.6,0));
+    const band=(c:[number,number,number,number])=>{
+      const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
+      b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
+      const ix:number[]=[],seg=96,r0=GHOST_RING_RADIUS-GHOST_RING_WIDTH/2,r1=GHOST_RING_RADIUS+GHOST_RING_WIDTH/2;
+      for(let i=0;i<=seg;i++){
+        const a=i*2*Math.PI/seg,cs=Math.cos(a),sn=Math.sin(a);
+        b.appendVerticesInterleaved([cs*r0,0,sn*r0,0,1,0,...c]);b.appendVerticesInterleaved([cs*r1,0,sn*r1,0,1,0,...c]);
+        if(i<seg){const v=i*2;ix.push(v,v+1,v+3,v,v+3,v+2,v,v+3,v+1,v,v+2,v+3);}
+      }
+      b.appendIndices(ix);const mesh=b.getMesh();b.updateMesh();return mesh;
+    };
+    const idle=band([0.85,0.8,1,0.35]),hot=band([0.8,0.68,1,0.8]);
+    const visual=ring.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    visual.mesh=idle;visual.mainMaterial=mat;
+    let hover=-1,drag:{interactor:Interactor;from:number;rot:quat}|null=null;
+    const angleAt=(it:Interactor):number|null=>{
+      const center=g.getTransform().getWorldPosition();
+      let p:vec3=null;
+      if(it.activeTargetingMode===TargetingMode.Direct||it.activeTargetingMode===TargetingMode.Poke)p=it.startPoint;
+      else if(it.startPoint&&it.direction&&Math.abs(it.direction.y)>0.02){
+        const t=(center.y-it.startPoint.y)/it.direction.y;
+        if(t>0)p=it.startPoint.add(it.direction.uniformScale(t));
+      }
+      if(!p)return null;
+      const dx=p.x-center.x,dz=p.z-center.z;
+      return Math.hypot(dx,dz)<5?null:Math.atan2(dx,dz);
+    };
+    const refresh=()=>{visual.mesh=drag||getTime()-hover<0.15?hot:idle;};
+    for(let i=0;i<GHOST_RING_HITS;i++){
+      const a=i*2*Math.PI/GHOST_RING_HITS;
+      const hit=global.scene.createSceneObject("Turn ring hit");hit.setParent(ring);
+      hit.getTransform().setLocalPosition(new vec3(Math.cos(a)*GHOST_RING_RADIUS,4,Math.sin(a)*GHOST_RING_RADIUS));
+      hit.getTransform().setLocalRotation(quat.angleAxis(-a,vec3.up()));
+      const col=hit.createComponent("Physics.ColliderComponent") as ColliderComponent;
+      const box=Shape.createBoxShape();box.size=new vec3(GHOST_RING_WIDTH+8,10,2*Math.PI*GHOST_RING_RADIUS/GHOST_RING_HITS+2);col.shape=box;
+      const input=hit.createComponent(Interactable.getTypeName()) as Interactable;
+      input.targetingMode=TargetingMode.All;input.enableInstantDrag=true;input.targetingPriority=TargetingPriority.High;
+      input.onHoverEnter.add(()=>{hover=getTime();refresh();});
+      input.onHoverUpdate.add(()=>{hover=getTime();});
+      input.onHoverExit.add(()=>{hover=-1;refresh();});
+      input.onTriggerStart.add(e=>{
+        e.stopPropagation();
+        const from=angleAt(e.interactor);
+        if(from===null||drag)return;
+        drag={interactor:e.interactor,from,rot:g.getTransform().getWorldRotation()};
+        this.benchHeld=true;this.lastAction=getTime();refresh();
+      });
+      input.onTriggerUpdate.add(e=>{
+        if(!drag||drag.interactor!==e.interactor)return;
+        e.stopPropagation();
+        const now=angleAt(e.interactor);
+        if(now===null)return;
+        g.getTransform().setWorldRotation(quat.angleAxis(now-drag.from,vec3.up()).multiply(drag.rot));
+        this.lastAction=getTime();
+      });
+      const end=()=>{drag=null;refresh();};
+      input.onTriggerEnd.add(end);input.onTriggerEndOutside.add(end);input.onTriggerCanceled.add(end);
+    }
+  }
+  private placeBench():void {
+    if(!this.benchAim||this.floorY===null||!this.benchGhost)return;
+    const rot=this.benchGhost.getTransform().getWorldRotation();
+    this.benchGhost.enabled=false;
+    if(this.benchPlaceUI&&!isNull(this.benchPlaceUI))this.benchPlaceUI.enabled=false;
+    this.workbenchShown=true;this.benchHeld=false;
+    this.placeAudio.play(1);
+    // A first-time user pages through the intro on the bench console before the Photo/Video buttons.
+    this.workbench.show(this.floorY,{cards:INTRO_CARDS,onDone:()=>{markIntroSeen();this.lastAction=getTime();}},!introSeen(),this.benchAim,true,rot);
+    this.benchAim=null;
+  }
+  /** A fist closing right next to something (no pointing needed): turns a dial, the edit ring or a tilt
+   * wheel; on a camera or light head, raising/lowering the hand sets the rig's height and tipping the
+   * wrist up/down tilts it; on any other prop, picks it up to move one-to-one with the hand. */
+  private nearGrab(point:vec3,hand:BaseHand):NearGrab|null {
+    if(this.workbench.active||this.angleCapture.guiding)return null;
+    for(let i=ScoutRotaryDial.all.length-1;i>=0;i--){
+      const d=ScoutRotaryDial.all[i];
+      if(isNull(d.root)){ScoutRotaryDial.all.splice(i,1);continue}
+      if(d.handTurnBegin(point)){this.lastAction=getTime();return {update:p=>d.handTurnUpdate(p),end:()=>d.handTurnEnd()};}
+    }
+    if(this.gizmo.handTurnBegin(point))return {update:p=>this.gizmo.handTurnUpdate(p),end:()=>this.gizmo.handTurnEnd()};
+    for(const h of this.heightSliders){
+      if(isNull(h.root)||!h.wheel.root.enabled)continue;
+      if(h.wheel.handTurnBegin(point))return {update:p=>h.wheel.handTurnUpdate(p),end:()=>h.wheel.handTurnEnd()};
+    }
+    for(const h of this.heightSliders){
+      if(isNull(h.root)||!h.root.enabled)continue;
+      const box=worldBounds(h.rig.tilting);
+      if(!box||!insideBox(point,box.min,box.max,NEAR_REACH))continue;
+      const startLift=h.lift(),startY=point.y,startPitch=handPitch(hand),startTilt=h.rig.tiltAngle;
+      this.lastAction=getTime();this.selectAudio.play(1);
+      return {
+        update:(p,hd)=>{
+          h.setLift(startLift+(p.y-startY));
+          h.setTilt(startTilt+(handPitch(hd)-startPitch));
+          this.lastAction=getTime();
+        },
+        end:()=>{this.lastAction=getTime();},
+      };
+    }
+    for(const root of this.placed){
+      if(isNull(root)||!root.enabled||this.dummies.get(root)?.dragging||(this.dummies.has(root)&&this.gizmo.isEditing(root)))continue;
+      const col=root.getComponent("Physics.ColliderComponent") as ColliderComponent;
+      const shape=col?col.shape as BoxShape:null;
+      if(!shape)continue;
+      const local=root.getTransform().getInvertedWorldTransform().multiplyPoint(point),s=shape.size;
+      if(Math.abs(local.x)<s.x/2+NEAR_REACH&&Math.abs(local.y)<s.y/2+NEAR_REACH&&Math.abs(local.z)<s.z/2+NEAR_REACH)return {move:root};
+    }
+    return null;
+  }
+  /** Each prop's edit badge icon, found once: a pencil, or a check while that prop is in edit mode (so
+   * the same badge reads as "done" and closes it). */
+  private editIcons=new Map<SceneObject,{img:Image;editing:boolean}>();
+  private updateEditBadges():void {
+    for(const root of this.placed){
+      if(isNull(root))continue;
+      let e=this.editIcons.get(root);
+      if(!e){
+        const badge=findDescendant(root,n=>n==="Edit"||n==="EditBadge");
+        const img=badge?findComponentBelow(badge,"Component.Image") as Image:null;
+        if(!img)continue;
+        e={img,editing:false};this.editIcons.set(root,e);
+      }
+      const editing=this.gizmo.isEditing(root);
+      if(editing===e.editing||isNull(e.img))continue;
+      e.editing=editing;
+      e.img.mainPass.baseTex=editing?DONE_ICON:EDIT_BADGE_ICON;
+    }
+    for(const k of this.editIcons.keys())if(isNull(k))this.editIcons.delete(k);
+  }
+  private captureClear=false;
+  private captureHidden:SceneObject=null;
+  /** Walking up to a camera to capture its angle: once close, every floating panel (name tags, dials,
+   * monitors, notes, the menu) and that camera's own model step aside so the view is clear. They come
+   * back when the capture finishes, is cancelled, or the user steps away. */
+  private updateCaptureClear():void {
+    const target=this.angleCapture.target;
+    let near=false;
+    if(target){
+      const head=this.camera.getTransform().getWorldPosition(),p=target.getTransform().getWorldPosition();
+      near=Math.hypot(head.x-p.x,head.z-p.z)<CAPTURE_CLEAR_RADIUS;
+    }
+    if(near===this.captureClear)return;
+    this.captureClear=near;
+    for(const e of this.facingUI)if(!isNull(e.pivot))e.pivot.enabled=!near;
+    for(const w of this.noteWizards)if(!isNull(w.root))w.root.enabled=!near;
+    if(this.captureHidden&&!isNull(this.captureHidden))this.captureHidden.enabled=true;
+    this.captureHidden=near?target:null;
+    if(near)target.enabled=false;
+  }
+  private menuSweepAt=0;
+  /** The menu wins any pinch over the props behind it: its buttons get top targeting priority. Its
+   * contents are rebuilt as pages change, so new buttons are picked up by a sweep twice a second. */
+  private prioritizeMenu():void {
+    if(getTime()<this.menuSweepAt||!this.palette||isNull(this.palette.sceneObject))return;
+    this.menuSweepAt=getTime()+0.5;
+    const visit=(so:SceneObject)=>{
+      const it=so.getComponent(Interactable.getTypeName()) as Interactable;
+      if(it&&it.targetingPriority!==TargetingPriority.High)it.targetingPriority=TargetingPriority.High;
+      for(let i=0;i<so.getChildrenCount();i++)visit(so.getChild(i));
+    };
+    visit(this.palette.sceneObject);
+  }
   /** A dummy's limbs are grabbable (and its joints show) only while it's in edit mode. */
   private updateDummies():void {
     for(const [root,dummy] of this.dummies){
@@ -1078,7 +1388,7 @@ export class ScoutMain extends BaseScriptComponent {
       if(show&&h.facingPivot&&!isNull(h.facingPivot))h.pivot.getTransform().setLocalRotation(h.facingPivot.getTransform().getLocalRotation());
       const wheel=editing||h.wheel.dragging;
       if(h.wheel.root.enabled!==wheel)h.wheel.root.enabled=wheel;
-      if(wheel)h.wheel.updateGlow();
+      if(wheel){h.wheel.updateGlow();h.wheel.faceViewer(this.camera.getTransform().getWorldPosition());}
     }
   }
   /** Occlusion: the World Mesh (the room as Specs reconstructs it) drawn with a depth-only occluder, so
@@ -1087,6 +1397,25 @@ export class ScoutMain extends BaseScriptComponent {
   private occluder:SceneObject=null;
   private occluderProvider:WorldRenderObjectProvider=null;
   private occlusionOn=false;
+  /** Your real hands hide the props behind them: InteractionKit's hand visuals switch to their Full
+   * hand mesh, which renders as an occluder by default. Separate from (and much cheaper than) the room
+   * occlusion toggle, so it's always on. Found by walking the scene once the kit has spawned them. */
+  private enableHandOcclusion():void {
+    const apply=():number=>{
+      let n=0;
+      const visit=(so:SceneObject)=>{
+        for(const c of so.getComponents("Component.ScriptComponent") as any[]){
+          if(c&&c instanceof HandVisual){c.meshType=HandMeshType.Full;n++;}
+        }
+        for(let i=0;i<so.getChildrenCount();i++)visit(so.getChild(i));
+      };
+      for(let i=0;i<global.scene.getRootObjectsCount();i++)visit(global.scene.getRootObject(i));
+      return n;
+    };
+    const ev=this.createEvent("DelayedCallbackEvent");
+    ev.bind(()=>{const n=apply();if(n===0)console.warn("Scout: no hand visuals found for hand occlusion");});
+    ev.reset(0.5);
+  }
   private setupOcclusion():void {
     if(!this.worldMesh||!this.occluderMaterial)return;
     this.occluder=global.scene.createSceneObject("World occluder");
@@ -1096,8 +1425,8 @@ export class ScoutMain extends BaseScriptComponent {
     // Drawn before everything else, so its depth is in place when the props render.
     visual.setRenderOrder(OCCLUDER_RENDER_ORDER);
     this.occluderProvider=this.worldMesh.control as WorldRenderObjectProvider;
-    // On unless the user has turned it off on this device.
-    let on=true;
+    // Off unless the user has turned it on on this device: reconstructing the room heats Specs fast.
+    let on=false;
     try{const store=global.persistentStorageSystem.store;if(store.has(OCCLUSION_KEY))on=store.getBool(OCCLUSION_KEY);}catch(e){}
     this.setOcclusion(on,false);
   }
@@ -1159,6 +1488,7 @@ export class ScoutMain extends BaseScriptComponent {
       dummy.onChanged=before=>{
         this.lastAction=getTime();
         if(isNull(root))return;
+        this.floorSeen.delete(root);
         this.fitDummy(root,true);
         this.liftOnto(root,before);
         if(this.editing===root)this.gizmo.update();
@@ -1169,11 +1499,11 @@ export class ScoutMain extends BaseScriptComponent {
       t.setLocalPosition(new vec3(0,-height/2,0));
       this.pivotAtFeet(root,body);
       if(lightState)lightRef=this.buildKeyLight(model,lightState);
-      // Standing/seated subjects both cast and receive shadows on themselves so a nearby key light
-      // actually shows contours (nose, contact shadows) on the subject, not just floodlighting it.
+      // Subjects cast shadows but don't receive them: receiving its own shadow map made a lit dummy
+      // ripple with shadow-acne ridges on whichever side faced the Light.
       if(kind===3||kind===4){
         const visual=findMeshVisual(model);
-        if(visual)visual.meshShadowMode=MeshShadowMode.Both;
+        if(visual)visual.meshShadowMode=MeshShadowMode.Caster;
       }
     }else{
       buildMarkerMesh(body,kind,this.markerMaterial,false);
@@ -1213,6 +1543,11 @@ export class ScoutMain extends BaseScriptComponent {
     const col=root.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();shape.size=kind===2?new vec3(14,NOTE_PIN_HEIGHT,14):new vec3(kind>=3?55:70,height,kind>=3?55:70);
     col.shape=shape;col.debugDrawEnabled=this.debugColliders;
+    // The prop itself never catches the cursor: pointing past it at a dial, a button or another prop
+    // shouldn't snag on it. The box still sizes things (the fist grab's reach, the floor halo, a lying
+    // dummy's footprint) and pickProp aims the far fist grab with it; its own buttons and dials have
+    // their own colliders.
+    col.enabled=false;
     if(rig)this.attachRigControls(root,rig,cameraState,height,col,{sliderY:SLIDER_Y,camera:rig});
     if(lightRigObj)this.attachRigControls(root,lightRigObj,lightState,height,col,{sliderY:LIGHT_SLIDER_Y,savedTilt:lightState.tilt||0});
     // A saved dummy may be lying down: centre it on its marker and fit its hit box (see fitDummy).
@@ -1232,15 +1567,12 @@ export class ScoutMain extends BaseScriptComponent {
     interactable.onHoverEnter.add(onProp);
     interactable.onHoverUpdate.add(onProp);
     interactable.onHoverExit.add(()=>{if(this.hovered===root)this.hovered=null;});
-    // The prop itself grows a touch under the cursor, like the buttons, so it reads as grabbable.
-    // Notes skip it: their pin carries its own wizard buttons, which already respond to hover.
-    if(kind!==2)addHoverFeedback(interactable,body,undefined,MARKER_HOVER_SCALE,true);
     const manipulation=root.createComponent(InteractableManipulation.getTypeName()) as InteractableManipulation;
     manipulation.setCanScale(false);
     manipulation.setCanRotate(false);
-    // Moving is a grab (ScoutGrabMove); a pinch-drag only moves props with the Hand tool selected, so
-    // pinching a prop's buttons and dials can't nudge it by accident.
-    manipulation.setCanTranslate(this.selected===HAND_KIND);
+    // Moving is a grab (ScoutGrabMove) or the edit arrows; a pinch never drags a prop, so pinching its
+    // buttons, dials or limbs can't nudge it by accident.
+    manipulation.setCanTranslate(false);
     // Only a real move drops back onto the surface — a tap on a child (dial, badge) can propagate a
     // zero-length translation here, and must not knock a deliberately raised actor back to the floor.
     let grabbedAt:vec3=null;
@@ -1264,15 +1596,22 @@ export class ScoutMain extends BaseScriptComponent {
     // Tilt is applied later, in spawnMarker/restore — at this point the marker root hasn't been given
     // its final camera-facing rotation yet (that happens after makeMarker returns), so computing a
     // "forward" here would tilt relative to a stale, still-identity orientation.
-    const light=bulb.createComponent("Component.LightSource") as LightSource;
-    // Spot is what a real key light shines like, but its cone angle is Editor-API-only (StudioLib's
-    // LightSource has no angle/cone property at all — grepped the whole class). A Spot built purely at
-    // runtime gets a degenerate, effectively zero-width cone and lights nothing, confirmed by comparing
-    // against Point (illuminates fine, no shadows) and Directional (illuminates fine, shadows work) in
-    // the live preview. Directional trades away real distance falloff — it lights the whole scene from
-    // one angle rather than falling off near the stand — but it's the only combination that actually
-    // shows both illumination and a cast shadow on a subject.
-    light.lightType=LightType.Directional;
+    // A real key light is a Spot: a soft cone that falls off with distance, so a light across the room
+    // barely touches a subject. Built here (the runtime API sets the cone and falloff), on the same render
+    // layer as the props so it actually lights them.
+    // The aiming in tiltKeyLight points the bulb's -Z along the beam (what a Directional light wanted);
+    // a Spot shines out of its +Z, so it sits on a child turned half round to face out of the softbox.
+    const emitter=global.scene.createSceneObject("Spot");emitter.setParent(bulb);
+    emitter.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.up()));
+    const light=emitter.createComponent("Component.LightSource") as LightSource;
+    light.lightType=LightType.Spot;
+    light.innerConeAngleDegrees=KEY_LIGHT_CONE_INNER;
+    light.outerConeAngleDegrees=KEY_LIGHT_CONE_OUTER;
+    light.falloffType=FalloffType.Quadratic;
+    light.falloffRange=KEY_LIGHT_RANGE;
+    light.renderLayer=model.layer;
+    console.log("Scout light: type="+light.lightType+" cone="+light.innerConeAngleDegrees+"/"+light.outerConeAngleDegrees
+      +" falloff="+light.falloffType+"@"+light.falloffRange+" layer="+JSON.stringify(light.renderLayer.numbers)+" propLayer="+JSON.stringify(model.layer.numbers)+" camLayer="+JSON.stringify(this.camera.renderLayer.numbers));
     // Shadows are handed out by assignLightShadows (one caster per scene), not per light.
     light.shadowType=ShadowType.None;
     const glowVisual=this.buildGlowDisc(model);
@@ -1302,7 +1641,10 @@ export class ScoutMain extends BaseScriptComponent {
     const rgb=kelvinToRGB(kelvin);
     ref.light.intensity=KEY_LIGHT_INTENSITY*pct;
     ref.light.color=rgb;
-    this.rebuildGlowMesh(ref.glowVisual,[rgb.x*pct,rgb.y*pct,rgb.z*pct,1]);
+    // The bulb glow keeps its colour bright at any intensity — dimming it by multiplying turned warm
+    // colours brown. Intensity only takes a little off the top.
+    const glow=0.82+0.18*pct;
+    this.rebuildGlowMesh(ref.glowVisual,[rgb.x*glow,rgb.y*glow,rgb.z*glow,1]);
   }
   private rebuildGlowMesh(visual:RenderMeshVisual,color:[number,number,number,number]):void {
     const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
@@ -1380,7 +1722,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.palette.setShootType(type);this.placeAudio.play(1);
     // The camera ghost shows this shoot's rig.
     this.rebuildPreview();
-    if(fromBench)this.schedule(KIT_DELAY,()=>this.toolkitCard.show(KIT_TITLE,KIT_CARDS));
+    if(fromBench)this.schedule(KIT_DELAY,()=>this.toolkitCard.show(KIT_TITLE,KIT_CARDS,()=>this.palette&&!isNull(this.palette.sceneObject)&&this.palette.sceneObject.enabled?this.palette.sceneObject:null));
     this.tips.show("place");
     console.log("Scout shoot type: "+type);
   }
@@ -1679,5 +2021,45 @@ export class ScoutMain extends BaseScriptComponent {
 
 function findChild(root:SceneObject,name:string):SceneObject|null {
   for(let i=0;i<root.getChildrenCount();i++)if(root.getChild(i).name===name)return root.getChild(i);
+  return null;
+}
+
+/** World-space box around every mesh under `root`, or null if it has none. */
+function worldBounds(root:SceneObject):{min:vec3;max:vec3}|null {
+  const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
+  const visit=(so:SceneObject)=>{
+    const v=so.getComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    if(v&&so.isEnabledInHierarchy){
+      const a=v.worldAabbMin(),b=v.worldAabbMax();
+      lo[0]=Math.min(lo[0],a.x);lo[1]=Math.min(lo[1],a.y);lo[2]=Math.min(lo[2],a.z);
+      hi[0]=Math.max(hi[0],b.x);hi[1]=Math.max(hi[1],b.y);hi[2]=Math.max(hi[2],b.z);
+    }
+    for(let i=0;i<so.getChildrenCount();i++)visit(so.getChild(i));
+  };
+  visit(root);
+  return Number.isFinite(lo[0])?{min:new vec3(lo[0],lo[1],lo[2]),max:new vec3(hi[0],hi[1],hi[2])}:null;
+}
+function insideBox(p:vec3,min:vec3,max:vec3,pad:number):boolean {
+  return p.x>min.x-pad&&p.x<max.x+pad&&p.y>min.y-pad&&p.y<max.y+pad&&p.z>min.z-pad&&p.z<max.z+pad;
+}
+/** How far the hand is tipped up (+) or down (-), in degrees: wrist to middle knuckle against level. */
+function handPitch(hand:BaseHand):number {
+  const f=hand.middleKnuckle.position.sub(hand.wrist.position);
+  return f.length>0.1?Math.asin(Math.max(-1,Math.min(1,f.y/f.length)))*180/Math.PI:0;
+}
+
+function findDescendant(root:SceneObject,match:(name:string)=>boolean):SceneObject|null {
+  for(let i=0;i<root.getChildrenCount();i++){
+    const c=root.getChild(i);
+    if(match(c.name))return c;
+    const d=findDescendant(c,match);
+    if(d)return d;
+  }
+  return null;
+}
+function findComponentBelow(root:SceneObject,type:string):Component|null {
+  const own=root.getComponent(type as any) as Component;
+  if(own)return own;
+  for(let i=0;i<root.getChildrenCount();i++){const c=findComponentBelow(root.getChild(i),type);if(c)return c;}
   return null;
 }

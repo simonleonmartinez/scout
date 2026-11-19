@@ -1,6 +1,6 @@
 import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {Interactor} from "InteractionKit.lspkg/Core/Interactor/Interactor";
-import {addBox} from "./ScoutMarkerMesh";
+import animate from "InteractionKit.lspkg/Utils/animate";
 
 /** One selectable stop on a dial — the underlying numeric value plus how it's displayed. */
 export type DialStep = {value:number; text:string};
@@ -33,7 +33,43 @@ const ARC_HALF=135*Math.PI/180;
  * it sits above) with subtle tick marks, a label above and the current value as text below — the
  * number is the readout, not a needle. Click/drag (direct or indirect) selects one of `config.steps`,
  * snapping as you go. Purely a view — callers own what a value change actually does. */
+// How close (cm) a closed hand must be to a dial's face to take hold of it.
+const DIAL_REACH=8;
+// Grooves round a dial's rim.
+const KNURL_TEETH=40;
+/** Ring meshes by size and colour, shared by every dial (see rebuildRingMesh). */
+const RING_MESHES=new Map<string,RenderMesh>();
+
 export class ScoutRotaryDial {
+  /** Every dial alive, for up-close fist turning (ScoutMain looks for one within reach of the hand). */
+  static readonly all:ScoutRotaryDial[]=[];
+  /** A fist closing on this dial up close starts turning it; returns whether it caught. */
+  handTurnBegin(point:vec3):boolean {
+    if(isNull(this.root)||!this.root.isEnabledInHierarchy)return false;
+    const t=this.root.getTransform(),d=point.sub(t.getWorldPosition());
+    const scale=t.getWorldScale().x;
+    const off=d.dot(t.forward),inPlane=d.sub(t.forward.uniformScale(off)).length;
+    if(Math.abs(off)>DIAL_REACH||inPlane>(this.ringRadius+this.tubeRadius)*scale+DIAL_REACH*0.5)return false;
+    this.active=true;this.refreshRingColor();
+    this.applyAngle(this.angleFromPoint(point));
+    return true;
+  }
+  handTurnUpdate(point:vec3):void {this.applyAngle(this.angleFromPoint(point));}
+  handTurnEnd():void {this.active=false;this.refreshRingColor();}
+  private angleFromPoint(point:vec3):number|null {
+    const t=this.root.getTransform(),v=point.sub(t.getWorldPosition());
+    const x=v.dot(t.right),y=v.dot(t.up);
+    if(Math.abs(x)<1e-5&&Math.abs(y)<1e-5)return null;
+    return Math.atan2(x,y);
+  }
+  private applyAngle(angle:number|null):void {
+    if(angle===null)return;
+    const idx=this.indexFromAngle(angle);
+    if(idx!==this.index){
+      this.index=idx;this.updateValueText();this.refreshFill();this.spinTo(idx);
+      this.config.onChange(idx,this.config.steps[idx].value);
+    }
+  }
   private index:number;
   private ringRadius:number;
   private tubeRadius:number;
@@ -66,12 +102,16 @@ export class ScoutRotaryDial {
     this.valueText=this.text(this.root,"",new vec3(0,0,this.tubeRadius+0.15),holeDiameter*0.92,holeDiameter*0.6,valueColor,56);
     this.updateValueText();
     this.refreshFill();
+    ScoutRotaryDial.all.push(this);
   }
   private buildRing():void {
     const host=this.obj(this.root,"DialKnob",vec3.zero());
-    this.ringVisual=host.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-    this.ringVisual.mainMaterial=this.material.clone();
+    // The puck itself lives on a child that turns with the value; the hit box on `host` stays put.
+    this.ridges=this.obj(host,"Knurl",vec3.zero());
+    this.ringVisual=this.ridges.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    this.ringVisual.mainMaterial=this.material;
     this.rebuildRingMesh(this.theme.idleColor);
+    this.spinTo(this.index,false);
     const col=host.createComponent("Physics.ColliderComponent") as ColliderComponent;
     const shape=Shape.createBoxShape();
     const outer=(this.ringRadius+this.tubeRadius)*2;
@@ -97,7 +137,7 @@ export class ScoutRotaryDial {
     if(angle===null)return;
     const idx=this.indexFromAngle(angle);
     if(idx!==this.index){
-      this.index=idx;this.updateValueText();this.refreshFill();
+      this.index=idx;this.updateValueText();this.refreshFill();this.spinTo(idx);
       this.config.onChange(idx,this.config.steps[idx].value);
     }
   }
@@ -131,19 +171,56 @@ export class ScoutRotaryDial {
   }
   /** Subtle engraved tick marks around the ring's rim — small and low-contrast, reference marks rather
    * than the dial's main readout (the value text below is). */
+  /** The fixed pointer just above the dial: a small wedge pointing down at the knurled rim, so the
+   * puck visibly turns under it as the value changes. */
   private buildTicks():void {
-    this.config.steps.forEach((_,i)=>{
-      const host=this.obj(this.root,"Tick",vec3.zero());
-      host.getTransform().setLocalRotation(quat.angleAxis(-this.angleForIndex(i),vec3.forward()));
-      const tick=this.obj(host,"TickMark",new vec3(0,this.ringRadius+this.tubeRadius+0.55,0.05));
-      const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
-      b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
-      const ix:number[]=[];
-      addBox(b,ix,0,0,0,0.05,0.22,0.03,this.colorArr(this.theme.tickColor),0);
-      b.appendIndices(ix);
-      const visual=tick.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-      visual.mesh=b.getMesh();visual.mainMaterial=this.material.clone();b.updateMesh();
-    });
+    const pb=this.builder(),pix:number[]=[];
+    const top=this.ringRadius+this.tubeRadius+0.35,w=this.tubeRadius*0.45,h=this.tubeRadius*0.6,pc=this.colorArr(this.theme.textColor);
+    const tri=[[-w,top+h],[w,top+h],[0,top]];
+    for(const zf of [0.08,-0.08])for(const [x,y] of tri)pb.appendVerticesInterleaved([x,y,zf,0,0,1,...pc]);
+    pix.push(0,1,2,0,2,1,3,4,5,3,5,4);
+    pb.appendIndices(pix);
+    const pv=this.obj(this.root,"Pointer",vec3.zero()).createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    pv.mesh=pb.getMesh();pv.mainMaterial=this.material;pb.updateMesh();
+  }
+  private ridges:SceneObject=null;
+  private ridgeAngle=0;
+  private spinCancel:(()=>void)|null=null;
+  /** Turns the knurled puck so the dial reads as rotating with the value (clockwise as it goes up). */
+  private spinTo(index:number,animated=true):void {
+    if(!this.ridges)return;
+    const target=-this.angleForIndex(index);
+    const t=this.ridges.getTransform();
+    if(this.spinCancel){this.spinCancel();this.spinCancel=null;}
+    if(!animated){this.ridgeAngle=target;t.setLocalRotation(quat.angleAxis(target,vec3.forward()));return;}
+    const from=this.ridgeAngle;
+    this.spinCancel=animate({duration:0.14,easing:"ease-out-quad",update:k=>{
+      if(isNull(this.ridges))return;
+      this.ridgeAngle=from+(target-from)*k;
+      t.setLocalRotation(quat.angleAxis(this.ridgeAngle,vec3.forward()));
+    }});
+  }
+  private builder():MeshBuilder {
+    const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
+    b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;return b;
+  }
+  /** A box with half-size `h`, centred at `centre` then turned by `rot`; faces shaded for a front light. */
+  private box(b:MeshBuilder,ix:number[],vi:number,rot:quat,centre:vec3,h:number[],c:[number,number,number,number]):number {
+    const faces:[number,number,number][]=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+    for(const n of faces){
+      const a=n[0]!==0?[0,1,0]:[1,0,0],bb=[n[1]*a[2]-n[2]*a[1],n[2]*a[0]-n[0]*a[2],n[0]*a[1]-n[1]*a[0]];
+      const nw=rot.multiplyVec3(new vec3(n[0],n[1],n[2]));
+      const s=Math.min(1.25,0.6+Math.max(0,nw.x*-0.45+nw.y*0.55+nw.z*0.7)*0.7);
+      const col=[Math.min(1,c[0]*s),Math.min(1,c[1]*s),Math.min(1,c[2]*s),c[3]];
+      for(const [sa,sb] of [[-1,-1],[1,-1],[1,1],[-1,1]]){
+        const local=new vec3((n[0]+a[0]*sa+bb[0]*sb)*h[0],(n[1]+a[1]*sa+bb[1]*sb)*h[1],(n[2]+a[2]*sa+bb[2]*sb)*h[2]);
+        const p=rot.multiplyVec3(centre.add(local));
+        b.appendVerticesInterleaved([p.x,p.y,p.z,nw.x,nw.y,nw.z,...col]);
+      }
+      ix.push(vi,vi+1,vi+2,vi,vi+2,vi+3,vi,vi+2,vi+1,vi,vi+3,vi+2);
+      vi+=4;
+    }
+    return vi;
   }
   private refreshRingColor():void {
     const color=this.active?this.theme.activeColor:this.hovered?this.theme.hoverColor:this.theme.idleColor;
@@ -157,38 +234,54 @@ export class ScoutRotaryDial {
    * reason for reading as "3D" rather than a flat ring) is invisible at a glance; the badge spheres
    * elsewhere in this file use the identical technique. */
   private rebuildRingMesh(color:vec4):void {
+    // Hover and drag only change the ring's colour: each size+colour is built once and shared by every
+    // dial, so hovering just swaps meshes instead of rebuilding a 512-triangle torus on Specs.
+    const key=[this.ringRadius,this.tubeRadius,color.x,color.y,color.z,color.w].map(n=>n.toFixed(3)).join("|");
+    const cached=RING_MESHES.get(key);
+    if(cached){this.ringVisual.mesh=cached;return;}
     const b=new MeshBuilder([{name:"position",components:3},{name:"normal",components:3,normalized:true},{name:"color",components:4}]);
     b.topology=MeshTopology.Triangles;b.indexType=MeshIndexType.UInt16;
-    const u=vec3.right(),v=vec3.up(),axis=vec3.forward();
-    const ringSeg=32,tubeSeg=8;
-    const lx=-0.45,ly=0.55,lz=0.7;const llen=Math.sqrt(lx*lx+ly*ly+lz*lz);
-    const nlx=lx/llen,nly=ly/llen,nlz=lz/llen;
-    type PN={p:vec3;n:vec3};
-    const point=(a:number,t:number):PN=>{
-      const radial=u.uniformScale(Math.cos(a)).add(v.uniformScale(Math.sin(a)));
-      const n=radial.uniformScale(Math.cos(t)).add(axis.uniformScale(Math.sin(t)));
-      const p=radial.uniformScale(this.ringRadius).add(n.uniformScale(this.tubeRadius));
-      return {p,n};
+    // A knurled metal puck, like a camera's command dial: flat front face, a hole in the middle for the
+    // value, and grooves all the way round the rim that turn with it. Faces are shaded for a light from
+    // the upper left so the teeth catch the light.
+    const outer=this.ringRadius+this.tubeRadius,inner=this.ringRadius-this.tubeRadius;
+    const depth=this.tubeRadius*0.22,front=this.tubeRadius*0.6,back=-this.tubeRadius*0.6;
+    const teeth=KNURL_TEETH,ix:number[]=[];let vi=0;
+    const L=new vec3(-0.45,0.55,0.7).normalize();
+    const shade=(n:vec3)=>Math.min(1.3,0.5+Math.max(0,n.dot(L))*0.65+Math.pow(Math.max(0,n.dot(L)),16)*0.6);
+    const col=(n:vec3,k=1)=>{const s2=shade(n)*k;return [Math.min(1,color.x*s2),Math.min(1,color.y*s2),Math.min(1,color.z*s2),color.w];};
+    const quad=(a:vec3,b2:vec3,c:vec3,d:vec3,n:vec3,k=1)=>{
+      const cc=col(n,k);
+      for(const p of [a,b2,c,d])b.appendVerticesInterleaved([p.x,p.y,p.z,n.x,n.y,n.z,...cc]);
+      ix.push(vi,vi+1,vi+2,vi,vi+2,vi+3);vi+=4;
     };
-    const shade=(n:vec3):number=>{
-      const diffuse=Math.max(0,n.x*nlx+n.y*nly+n.z*nlz);
-      return Math.min(1.3,0.5+diffuse*0.6+Math.pow(diffuse,20)*1.1);
-    };
-    let vi=0;const indices:number[]=[];
-    const addTri=(a:PN,b2:PN,c2:PN)=>{
-      const fn=a.n.add(b2.n).add(c2.n).normalize();
-      const s=shade(fn);
-      const col=[Math.min(1,color.x*s),Math.min(1,color.y*s),Math.min(1,color.z*s),color.w];
-      [a,b2,c2].forEach(({p,n})=>b.appendVerticesInterleaved([p.x,p.y,p.z,n.x,n.y,n.z,...col]));
-      indices.push(vi,vi+1,vi+2);vi+=3;
-    };
-    for(let j=0;j<ringSeg;j++)for(let k=0;k<tubeSeg;k++){
-      const a0=j*2*Math.PI/ringSeg,a1=(j+1)*2*Math.PI/ringSeg,t0=k*2*Math.PI/tubeSeg,t1=(k+1)*2*Math.PI/tubeSeg;
-      const p00=point(a0,t0),p10=point(a1,t0),p01=point(a0,t1),p11=point(a1,t1);
-      addTri(p00,p10,p01);addTri(p01,p10,p11);
+    const at=(a:number,r:number,z:number)=>new vec3(Math.sin(a)*r,Math.cos(a)*r,z);
+    // Rim profile: each tooth is a flat top then a groove (four points per tooth).
+    const prof:{a:number;r:number}[]=[];
+    for(let t=0;t<teeth;t++){
+      const a0=t*2*Math.PI/teeth,step=2*Math.PI/teeth;
+      prof.push({a:a0,r:outer-depth},{a:a0+step*0.18,r:outer},{a:a0+step*0.62,r:outer},{a:a0+step*0.8,r:outer-depth});
     }
-    b.appendIndices(indices);
-    this.ringVisual.mesh=b.getMesh();b.updateMesh();
+    const fn=vec3.forward();
+    for(let i2=0;i2<prof.length;i2++){
+      const p0=prof[i2],p1=prof[(i2+1)%prof.length];
+      // Front face: from the hole out to the toothed rim.
+      quad(at(p0.a,inner,front),at(p0.a,p0.r,front),at(p1.a,p1.r,front),at(p1.a,inner,front),fn,0.92);
+      // Rim wall between the two profile points, facing outward.
+      const e0=at(p0.a,p0.r,0),e1=at(p1.a,p1.r,0),edge=e1.sub(e0);
+      let n=edge.cross(fn).normalize();
+      if(n.dot(e0.add(e1))<0)n=n.uniformScale(-1);
+      quad(at(p0.a,p0.r,front),at(p0.a,p0.r,back),at(p1.a,p1.r,back),at(p1.a,p1.r,front),n);
+      // Inner wall of the hole.
+      const mid=(p0.a+p1.a)/2,ni=new vec3(-Math.sin(mid),-Math.cos(mid),0);
+      quad(at(p0.a,inner,back),at(p0.a,inner,front),at(p1.a,inner,front),at(p1.a,inner,back),ni,0.8);
+    }
+    // Both windings: the puck shows from any angle.
+    const n0=ix.length;for(let i2=0;i2<n0;i2+=3)ix.push(ix[i2],ix[i2+2],ix[i2+1]);
+    b.appendIndices(ix);
+    const mesh=b.getMesh();b.updateMesh();
+    RING_MESHES.set(key,mesh);
+    this.ringVisual.mesh=mesh;
   }
   private buildFill():void {
     // A small fixed forward offset, not tubeRadius-scaled: the previous -tubeRadius*0.4 (meant to sit
@@ -198,7 +291,7 @@ export class ScoutRotaryDial {
     // A small positive offset keeps it comfortably in front of the panel regardless of dial size.
     const host=this.obj(this.root,"Fill",new vec3(0,0,0.1));
     this.fillVisual=host.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
-    this.fillVisual.mainMaterial=this.material.clone();
+    this.fillVisual.mainMaterial=this.material;
   }
   private refreshFill():void {
     if(!this.fillVisual||!this.config.fillColorForValue)return;

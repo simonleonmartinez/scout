@@ -12,7 +12,7 @@ export const ISO_STOPS:DialStep[]=stops([100,200,400,800,1600,3200,6400,12800],v
 export const APERTURE_STOPS:DialStep[]=stops([1.2,1.4,2,2.8,4,5.6,8,11,16,22],v=>"f/"+v);
 export const SHUTTER_STOPS:DialStep[]=
   [30,15,8,4,2,1].map(v=>({value:v,text:v+"s"}))
-  .concat([2,4,8,15,30,60,125,250,500,1000,2000,4000,8000].map(v=>({value:1/v,text:"1/"+v})));
+  .concat([2,4,8,15,30,50,60,100,120,125,250,500,1000,2000,4000,8000].map(v=>({value:1/v,text:"1/"+v})));
 export const KELVIN_STOPS:DialStep[]=stops([2000,2500,3000,3500,4000,4500,5000,5600,6500,7500,9000,10000],v=>v+"K");
 export const INTENSITY_STOPS:DialStep[]=stops(Array.from({length:21},(_,i)=>i*5),v=>v+"%");
 
@@ -34,7 +34,7 @@ export type LightAssetState={intensityIndex:number;kelvinIndex:number;
   tilt?:number};
 
 export function defaultCameraState():CameraAssetState {
-  return {isoIndex:2,apertureIndex:3,shutterIndex:12,kelvinIndex:7}; // ISO 400, f/2.8, 1/125s, 5600K
+  return {isoIndex:2,apertureIndex:3,shutterIndex:12,kelvinIndex:7}; // ISO 400, f/2.8, 1/60s, 5600K
 }
 export function defaultLightState():LightAssetState {
   return {intensityIndex:20,kelvinIndex:7}; // 100%, 5600K — matches the light's original fixed look
@@ -48,7 +48,11 @@ export function kelvinToRGB(kelvin:number):vec3 {
   const r=t<=66?255:329.698727446*Math.pow(t-60,-0.1332047592);
   const g=t<=66?99.4708025861*Math.log(t)-161.1195681661:288.1221695283*Math.pow(t-60,-0.0755148492);
   const b=t>=66?255:t<=19?0:138.5177312231*Math.log(t-10)-305.0447927307;
-  return new vec3(clamp(r),clamp(g),clamp(b));
+  // The warm end is softened toward white (up to 60% at 2000K): true blackbody 2000K reads as a
+  // saturated orange in the glasses; this keeps it a pale warm white that still gets warmer step by step.
+  const soft=Math.pow(Math.max(0,Math.min(1,(5600-kelvin)/3600)),0.7)*0.6;
+  const mix=(x:number)=>x+(1-x)*soft;
+  return new vec3(mix(clamp(r)),mix(clamp(g)),mix(clamp(b)));
 }
 
 /** Note Asset state — the shot this waypoint pin annotates. `step` drives which page of the wizard is

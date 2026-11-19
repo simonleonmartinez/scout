@@ -185,6 +185,9 @@ const EDGE_ON=0.3;
 /** A small glass wheel on the camera's left side, on the tilt axis. Turning it turns the camera with it:
  * spin it forward (top toward the lens) to tilt down, backward to tilt up. ScoutMain shows it only while
  * the camera is in edit mode. */
+// How close (cm) a closed hand must be to a tilt wheel to take hold of it.
+const HAND_REACH=10;
+
 export class TiltWheel {
   readonly root:SceneObject;
   private drag:{interactor:Interactor;center:vec3;axis:vec3;view:vec3;edge:boolean;direct:boolean;
@@ -195,13 +198,50 @@ export class TiltWheel {
     this.root.enabled=false;
   }
   get dragging():boolean {return !!this.drag;}
+  private hand:{center:vec3;axis:vec3;previous:vec3;startTilt:number;angle:number}=null;
+  /** A fist closing on the wheel up close starts turning it with the hand; returns whether it caught. */
+  handTurnBegin(point:vec3):boolean {
+    if(!this.root.enabled||this.drag)return false;
+    const center=this.root.getTransform().getWorldPosition();
+    const axis=this.rig.tilting.getTransform().getWorldRotation().multiplyVec3(vec3.forward()).normalize();
+    const d=point.sub(center),off=d.dot(axis),inPlane=d.sub(axis.uniformScale(off)).length;
+    if(Math.abs(off)>HAND_REACH||inPlane>this.rig.wheel.radius+HAND_REACH)return false;
+    this.hand={center,axis,previous:point,startTilt:this.rig.tiltAngle,angle:0};
+    this.touched();
+    return true;
+  }
+  handTurnUpdate(point:vec3):void {
+    const h=this.hand;
+    if(!h)return;
+    const a=h.previous.sub(h.center),b=point.sub(h.center);
+    const from=a.sub(h.axis.uniformScale(a.dot(h.axis))),to=b.sub(h.axis.uniformScale(b.dot(h.axis)));
+    if(from.length>1&&to.length>1)h.angle+=Math.atan2(h.axis.dot(from.cross(to)),from.dot(to));
+    h.previous=point;
+    this.set(h.startTilt+h.angle*180/Math.PI);this.touched();
+  }
+  handTurnEnd():void {this.hand=null;this.touched();}
+  get handTurning():boolean {return !!this.hand;}
+  private side=-1;
+  /** Keeps the wheel on the side of the prop the user is looking from, so nobody has to walk round to
+   * tilt it. Not while it's being turned. */
+  faceViewer(eye:vec3):void {
+    if(this.drag||this.hand)return;
+    const local=this.rig.tilting.getTransform().getInvertedWorldTransform().multiplyPoint(eye);
+    const side=local.z>=0?1:-1;
+    if(side===this.side)return;
+    this.side=side;
+    const c=this.rig.wheel.center;
+    const t=this.root.getTransform();
+    t.setLocalPosition(new vec3(c.x,c.y,side*Math.abs(c.z)));
+    t.setLocalRotation(quat.angleAxis(side>0?Math.PI:0,vec3.up()));
+  }
   private glow:SceneObject=null;
   private hoverAt=-1;
   /** Called every frame while the wheel shows: the glow follows hover (with a short grace so it doesn't
    * flicker at the edge) and stays on while the wheel is being turned. */
   updateGlow():void {
     if(!this.glow||isNull(this.glow))return;
-    const on=getTime()-this.hoverAt<RING_GLOW_LINGER||!!this.drag;
+    const on=getTime()-this.hoverAt<RING_GLOW_LINGER||!!this.drag||!!this.hand;
     if(this.glow.enabled!==on)this.glow.enabled=on;
   }
   /** Rebuilds the ring for the rig's current body (sizes differ). */
@@ -209,6 +249,7 @@ export class TiltWheel {
     for(let i=this.root.getChildrenCount()-1;i>=0;i--)this.root.getChild(i).destroy();
     const {center,radius}=this.rig.wheel;
     this.root.getTransform().setLocalPosition(center);
+    this.root.getTransform().setLocalRotation(quat.quatIdentity());this.side=center.z>=0?1:-1;
     ringMesh(child(this.root,"Ring",vec3.zero()),radius,WHEEL_TUBE,RING_GLASS,material);
     // Soft purple glow around the ring while it's hovered (it's a thin target), off otherwise.
     this.glow=child(this.root,"Ring glow",vec3.zero());
@@ -249,8 +290,9 @@ export class TiltWheel {
       e.stopPropagation();this.touched();
       if(this.drag)return;
       const t=this.root.getTransform(),center=t.getWorldPosition();
-      // The wheel's axis is the tilt axis; a positive turn about it is a positive (upward) tilt.
-      const axis=t.getWorldRotation().multiplyVec3(vec3.forward()).normalize();
+      // The wheel's axis is the tilt axis; a positive turn about it is a positive (upward) tilt. Taken
+      // from the rig (not the wheel, which flips to face whoever is looking) so it never reverses.
+      const axis=this.rig.tilting.getTransform().getWorldRotation().multiplyVec3(vec3.forward()).normalize();
       const view=this.camera.getTransform().getWorldPosition().sub(center).normalize();
       const direct=e.interactor.activeTargetingMode===TargetingMode.Direct;
       const d={interactor:e.interactor,center,axis,view,edge:!direct&&Math.abs(view.dot(axis))<EDGE_ON,direct,

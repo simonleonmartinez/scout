@@ -38,6 +38,8 @@ export class ScoutAngleCapture {
   isGuiding(rec:AngleCameraRecord):boolean {return this.active===rec;}
   /** True while walking the user to a camera — placement pinches should be ignored meanwhile. */
   get guiding():boolean {return !!this.active;}
+  /** The camera being walked to, if any. */
+  get target():SceneObject|null {return this.active&&!isNull(this.active.root)?this.active.root:null;}
 
   register(root:SceneObject,screen:AngleScreen,photo:boolean):AngleCameraRecord {
     const rec:AngleCameraRecord={root,screen,photo,captured:null,stale:false};

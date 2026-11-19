@@ -2,6 +2,7 @@ import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
 import {IMAGE_MATERIAL_ASSET} from "UIKit.lspkg/Scripts/Utility/Assets";
 import {addBackPlateHover} from "./ScoutHover";
 import animate from "InteractionKit.lspkg/Utils/animate";
+import {TargetingPriority} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 
 const FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 // Brand inks: lavender titles (as in the bench header), cream body text, on a dark gear-grey panel.
@@ -181,6 +182,7 @@ export function image(so:SceneObject,tex:Texture,w:number,h:number,tint:vec4):vo
   img.mainMaterial=IMAGE_MATERIAL_ASSET.clone();img.mainPass.baseTex=tex;img.mainPass.baseColor=tint;
 }
 const CLOSE_ICON=requireAsset("../Icons/close.png") as Texture;
+const ARROW_ICON=requireAsset("../Icons/arrow_forward.png") as Texture;
 const CLOSE_NAME="Close",BUTTON_NAME="Button";
 const CLOSE_TINT=new vec4(0x3e/255,0x30/255,0x82/255,1);
 /** A small round × button (BackPlate circle with the close icon) that calls `onTap`. */
@@ -190,6 +192,8 @@ function closeButton(so:SceneObject,onTap:()=>void,size=CLOSE_SIZE):void {
   back.onInitialized.add(()=>{
     styleBack(back,CLOSE_TINT,size/2);
     back.interactionPlane.enabled=false;
+    // Tips and cards float in front of everything: their buttons win a pinch over a note or prop behind.
+    back.interactable.targetingPriority=TargetingPriority.High;
     back.interactable.onTriggerEnd.add(()=>onTap());
     addBackPlateHover(back,so,CLOSE_TINT);
   });
@@ -217,6 +221,8 @@ export function pillButton(parent:SceneObject,label:string,pos:vec3,w:number,h:n
   back.onInitialized.add(()=>{
     styleBack(back,tint,h/2);
     back.interactionPlane.enabled=false;
+    // Tips and cards float in front of everything: their buttons win a pinch over a note or prop behind.
+    back.interactable.targetingPriority=TargetingPriority.High;
     back.interactable.onTriggerEnd.add(()=>onTap());
     addBackPlateHover(back,so,tint);
   });
@@ -233,6 +239,10 @@ const KIT_W=86,KIT_H=58,KIT_TITLE=175,KIT_LABEL=150,KIT_CLOSE=12;
 const KIT_CARD_W=21,KIT_CARD_H=25,KIT_CARD_GAP=23,KIT_FAN=8,KIT_ICON=11;
 const KIT_CARD_TINT=new vec4(0x24/255,0x1c/255,0x48/255,1);
 const KIT_DEAL=0.22,KIT_STAGGER=0.12;
+// How long the toolkit card stays (s) if not closed; beside the menu, the gap to it (cm at the card's
+// design distance) and the arrow's size and colour.
+const KIT_SECONDS=15,KIT_ANCHOR_GAP=2,KIT_ARROW=9;
+const KIT_ARROW_TINT=new vec4(0xc1/255,0xad/255,0xff/255,1);
 export type KitCard={label:string;icon:Texture};
 
 /** "Place gear from your toolkit…" pop-up: a small fanned deck of the things that can be placed, with a ×
@@ -241,8 +251,13 @@ export class ScoutToolkitCard {
   private root:SceneObject=null;
   constructor(private camera:Camera,private schedule:(seconds:number,fn:()=>void)=>void){}
   get active():boolean {return !!this.root&&!isNull(this.root)&&this.root.enabled;}
-  show(title:string,cards:KitCard[]):void {
+  private anchor:(()=>SceneObject|null)|null=null;
+  private until=0;
+  /** With `anchor` (the menu), the card sits beside it, on the side toward the middle of the view, with
+   * an arrow pointing at it; otherwise it floats ahead of the user. It closes on × or after KIT_SECONDS. */
+  show(title:string,cards:KitCard[],anchor:(()=>SceneObject|null)|null=null):void {
     this.close();
+    this.anchor=anchor;this.until=getTime()+KIT_SECONDS;
     const root=global.scene.createSceneObject("Toolkit card");
     followGaze(root,this.camera,KIT_DISTANCE,KIT_DROP,KIT_FOLLOW,true);
     root.getTransform().setLocalScale(vec3.one().uniformScale(KIT_SCALE));
@@ -267,8 +282,41 @@ export class ScoutToolkitCard {
         animate({duration:KIT_DEAL,easing:"ease-out-back",update:p=>{if(!isNull(so))t.setLocalScale(vec3.one().uniformScale(Math.max(0.01,p)));}});
       });
     });
+    // The pointer: an arrow off the card's right edge, toward the menu.
+    const arrow=child(root,"Arrow",new vec3(KIT_W/2+KIT_ARROW/2+1.5,0,0.5));
+    image(arrow,ARROW_ICON,KIT_ARROW,KIT_ARROW,KIT_ARROW_TINT);
+    arrow.enabled=!!anchor;
+    this.arrow=arrow;
     sweepColliders(root,this.schedule);
     this.root=root;
+    this.placeBesideAnchor(true);
+  }
+  private arrow:SceneObject=null;
+  /** Beside the menu, turned to face the user and scaled to stay the same size to the eye at its depth.
+   * Returns false (and leaves it alone) when there's no menu to sit beside. */
+  private placeBesideAnchor(snap:boolean):boolean {
+    const a=this.anchor?this.anchor():null;
+    if(!a||!this.root||isNull(this.root))return false;
+    const cam=this.camera.getTransform(),eye=cam.getWorldPosition();
+    const ap=a.getTransform().getWorldPosition();
+    const dist=Math.max(20,ap.distance(eye));
+    const k=dist/KIT_DISTANCE,halfW=KIT_W*KIT_SCALE*k/2;
+    // Toward the middle of the view from the menu (the menu usually sits off to one side).
+    const toMenu=ap.sub(eye),right=cam.right;
+    const side=toMenu.dot(right)>=0?-1:1;
+    const goal=ap.add(right.uniformScale(side*(halfW+KIT_ANCHOR_GAP*k+(KIT_ARROW+3)*KIT_SCALE*k)));
+    const t=this.root.getTransform();
+    t.setWorldPosition(snap?goal:vec3.lerp(t.getWorldPosition(),goal,Math.min(1,getDeltaTime()*KIT_FOLLOW)));
+    const look=eye.sub(t.getWorldPosition());
+    if(look.length>1)t.setWorldRotation(quat.lookAt(look.normalize(),vec3.up()));
+    t.setWorldScale(vec3.one().uniformScale(KIT_SCALE*k));
+    // The arrow points from the card's edge toward the menu.
+    if(this.arrow&&!isNull(this.arrow)){
+      const at=this.arrow.getTransform();
+      at.setLocalPosition(new vec3(-side*(KIT_W/2+KIT_ARROW/2+1.5),0,0.5));
+      at.setLocalRotation(quat.angleAxis(side>0?Math.PI:0,vec3.forward()));
+    }
+    return true;
   }
   /** Hides it now and destroys it a moment later (never inside the × button's own callback). */
   close():void {
@@ -279,6 +327,8 @@ export class ScoutToolkitCard {
     this.schedule(0.5,()=>{if(!isNull(root))root.destroy();});
   }
   update():void {
-    if(this.active)followGaze(this.root,this.camera,KIT_DISTANCE,KIT_DROP,KIT_FOLLOW);
+    if(!this.active)return;
+    if(getTime()>this.until){this.close();return}
+    if(!this.placeBesideAnchor(false))followGaze(this.root,this.camera,KIT_DISTANCE,KIT_DROP,KIT_FOLLOW);
   }
 }

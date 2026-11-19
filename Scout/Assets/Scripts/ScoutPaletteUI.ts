@@ -84,7 +84,7 @@ const THEME_FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 // earlier 93/52/44 read as tiny on device.
 const TYPE_SCALE = {Title2:{size:110,weight:700},Body:{size:72,weight:600},Caption:{size:60,weight:500}};
 // The whole floating menu (panel, buttons, icons, text) is built in cm and then enlarged by this.
-const MENU_SCALE=1.15;
+const MENU_SCALE=1.03;
 // ── The creative hub (expanded menu): lavender field-journal styling, shared with the Note notebook. ──
 const HUB_PAPER=hex(0xE9E0F5),HUB_PAPER_2=hex(0xF4EFF9),HUB_PURPLE=hex(0x7656B5),HUB_INK=hex(0x393047),HUB_ACCENT=hex(0xAA91D5);
 const HUB_INK_SOFT=vec4.lerp(HUB_INK,HUB_PAPER,0.4),HUB_RULE=vec4.lerp(HUB_PAPER,HUB_ACCENT,0.55),HUB_WHITE=new vec4(1,1,1,1);

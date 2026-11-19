@@ -21,7 +21,13 @@ export function fingerCurl(hand:BaseHand):number|null {
     +ratio(hand.pinkyTip.position,hand.pinkyKnuckle.position))/3;
 }
 
+/** What a fist closing right next to something does: drives a control with the hand (turn a wheel,
+ * raise a rig) until the hand opens, or picks up a prop to move. */
+export type NearGrab={update(point:vec3,hand:BaseHand):void;end():void}|{move:SceneObject};
+
 export type GrabHooks={
+  /** Checked first, with the closing hand's position: something within reach of the hand, or null. */
+  near?(point:vec3,hand:BaseHand):NearGrab|null;
   /** The prop to pick up when a fist closes (the one under the cursor just before), or null. */
   target():SceneObject|null;
   onStart(root:SceneObject):void;
@@ -36,32 +42,47 @@ export type GrabHooks={
 export class ScoutGrabMove {
   private fist=[false,false];
   private grab:{hand:number;root:SceneObject;fromHand:vec3;fromRoot:vec3;gain:number;smoothed:vec3}=null;
+  private control:{hand:number;handler:{update(point:vec3,hand:BaseHand):void;end():void};smoothed:vec3}=null;
 
   constructor(private camera:Camera,private hooks:GrabHooks){}
 
   /** The prop currently held, if any. */
   get holding():SceneObject {return this.grab&&!isNull(this.grab.root)?this.grab.root:null;}
+  /** True while a fist is driving a control up close (a wheel, a rig). */
+  get controlling():boolean {return !!this.control;}
 
   update():void {
     HANDS.forEach((side,i)=>{
       const hand=HandInputData.getInstance().getHand(side);
       const curl=fingerCurl(hand);
       const fist=curl!==null&&curl<(this.fist[i]?FIST_OFF:FIST_ON);
-      if(fist&&!this.fist[i]&&!this.grab)this.begin(i,hand);
+      if(fist&&!this.fist[i]&&!this.grab&&!this.control)this.begin(i,hand);
       if(!fist&&this.fist[i]&&this.grab?.hand===i)this.end();
+      if(!fist&&this.fist[i]&&this.control?.hand===i){const c=this.control;this.control=null;c.handler.end();}
       this.fist[i]=fist;
     });
     if(this.grab)this.follow();
+    if(this.control){
+      const hand=HandInputData.getInstance().getHand(HANDS[this.control.hand]);
+      if(hand.isTracked()){
+        const c=this.control;
+        c.smoothed=vec3.lerp(c.smoothed,hand.middleKnuckle.position,Math.min(1,getDeltaTime()*SMOOTHING));
+        c.handler.update(c.smoothed,hand);
+      }
+    }
   }
 
   private begin(index:number,hand:BaseHand):void {
-    const root=this.hooks.target();
+    const point=hand.middleKnuckle.position;
+    const near=this.hooks.near?this.hooks.near(point,hand):null;
+    if(near&&!("move" in near)){this.control={hand:index,handler:near,smoothed:point};return}
+    const root=near&&"move" in near?near.move:this.hooks.target();
     if(!root||isNull(root))return;
     const head=this.camera.getTransform().getWorldPosition();
-    const point=hand.middleKnuckle.position;
     const fromRoot=root.getTransform().getWorldPosition();
     // Fixed for the whole grab: recomputing it as the prop approaches would feed back on itself.
-    const gain=Math.max(1,flatDistance(head,fromRoot)/Math.max(10,flatDistance(head,point)));
+    // Picked up by hand right next to it, it moves one-to-one with the hand.
+    const gain=near?1:Math.max(1,flatDistance(head,fromRoot)/Math.max(10,flatDistance(head,point)));
     this.grab={hand:index,root,fromHand:point,fromRoot,gain,smoothed:point};
     this.hooks.onStart(root);
   }

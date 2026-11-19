@@ -13,10 +13,14 @@ const SKIP_AFTER=20;
 const TRACK_COLOR:[number,number,number,number]=[0.08,0.25,0.12,1];
 const FILL_COLOR:[number,number,number,number]=[0.35,1,0.5,1];
 const TEXT_COLOR=new vec4(0.75,1,0.8,1);
+// Aim line from the hand to the ring (or the prompt), so it's clear where the hand is pointing.
+const LINE_COLOR:[number,number,number,number]=[0.55,1,0.65,0.55];
+const LINE_WIDTH=0.35;
 const FONT=requireAsset("../Fonts/Inter.ttf") as Font;
 
 export class ScoutFloorSetup {
   private ring:SceneObject;
+  private line:SceneObject;
   private fill:RenderMeshVisual;
   private fillBuilder:MeshBuilder;
   private label:SceneObject;
@@ -51,21 +55,34 @@ export class ScoutFloorSetup {
     t.horizontalOverflow=HorizontalOverflow.Overflow;t.verticalOverflow=VerticalOverflow.Overflow;
     this.text=t;
     this.ring.enabled=false;
+    // A unit-long bar along local +Z, stretched each frame from the hand to the target.
+    const lineMat=material.clone();
+    lineMat.mainPass.depthTest=false;lineMat.mainPass.depthWrite=false;lineMat.mainPass.blendMode=BlendMode.Normal;
+    this.line=global.scene.createSceneObject("FloorSetupAimLine");
+    const lb=this.builder(),ix:number[]=[];
+    const h=0.5,corners=[[-h,-h],[h,-h],[h,h],[-h,h]];
+    corners.forEach(([x,y])=>{lb.appendVerticesInterleaved([x,y,0,0,0,1,...LINE_COLOR]);lb.appendVerticesInterleaved([x,y,1,0,0,1,...LINE_COLOR]);});
+    for(let i=0;i<4;i++){const a=i*2,b=((i+1)%4)*2;ix.push(a,b,b+1,a,b+1,a+1,a,b+1,b,a,a+1,b+1);}
+    lb.appendIndices(ix);
+    const lv=this.line.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
+    lv.mesh=lb.getMesh();lv.mainMaterial=lineMat;lv.setRenderOrder(99);lb.updateMesh();
+    this.line.enabled=false;
   }
   /** Runs setup again from the start (menu → Reset Floor). */
   restart():void {
     this.anchor=null;this.progress=0;this.started=null;this.confirmedAt=null;this.skipped=false;
-    this.ring.enabled=false;
+    this.ring.enabled=false;this.line.enabled=false;
   }
   /** Pinch-to-skip: placement falls back to automatic floor detection. */
-  skip():void {this.skipped=true;this.ring.enabled=false;this.label.enabled=false;}
+  skip():void {this.skipped=true;this.ring.enabled=false;this.label.enabled=false;this.line.enabled=false;}
 
   /** `floorHit` is a fresh floor-candidate hit where the user is pointing, or null; `aim` places the
-   * prompt when there's nothing to anchor the ring to yet. */
-  update(floorHit:vec3,aim:vec3):void {
+   * prompt when there's nothing to anchor the ring to yet. `hand` is where the pointing ray starts (null
+   * for the mouse), for the aim line. */
+  update(floorHit:vec3,aim:vec3,hand:vec3|null=null):void {
     if(this.skipped)return;
     if(this.started===null)this.started=getTime();
-    if(this.confirmedAt!==null){this.finishing();return}
+    if(this.confirmedAt!==null){this.line.enabled=false;this.finishing();return}
     const dt=getDeltaTime();
     if(floorHit){
       const far=!this.anchor||Math.hypot(floorHit.x-this.anchor.x,floorHit.z-this.anchor.z)>MOVE_TOLERANCE;
@@ -86,11 +103,21 @@ export class ScoutFloorSetup {
       this.text.text="Point at the floor"+skipLine;
       this.placeLabel(aim);
     }
+    this.drawLine(hand,this.anchor?this.anchor.add(new vec3(0,LIFT,0)):aim);
     if(this.progress>=1){
       this.confirmedAt=getTime();
       this.text.text="Floor set";
       this.onConfirmed(this.anchor.y);
     }
+  }
+  private drawLine(from:vec3|null,to:vec3):void {
+    const d=from&&to?to.sub(from):null;
+    if(!d||d.length<5){this.line.enabled=false;return}
+    this.line.enabled=true;
+    const t=this.line.getTransform();
+    t.setWorldPosition(from);
+    t.setWorldRotation(quat.lookAt(d.normalize(),Math.abs(d.normalize().y)>0.99?vec3.forward():vec3.up()));
+    t.setWorldScale(new vec3(LINE_WIDTH,LINE_WIDTH,d.length));
   }
   /** Holds the full ring and "Floor set" briefly, then tidies away. */
   private finishing():void {
