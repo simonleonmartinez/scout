@@ -151,9 +151,10 @@ const LIGHT_SLIDER_Y=18;
 // How close (cm) a closed hand must be to a prop (or a rig's head) to take hold of it without pointing.
 const NEAR_REACH=6;
 // The bench ghost's turn ring on the floor: radius and band width (cm), and how many hit boxes make it up.
-const GHOST_RING_RADIUS=88,GHOST_RING_WIDTH=8,GHOST_RING_HITS=32;
+const GHOST_RING_RADIUS=62,GHOST_RING_WIDTH=8,GHOST_RING_HITS=32;
 // The ghost's Place button floats this far (cm) above the floor, over the bench's top shelf.
-const BENCH_PLACE_UI_Y=150;
+// The Place button floats in front of the ghost at about chest height, where it's in view.
+const BENCH_PLACE_UI_Y=105,BENCH_PLACE_UI_FRONT=BENCH_SIZE.z/2+18;
 // The bench ghost stays this far (cm) from the user: never on top of them, never across the room.
 const BENCH_GHOST_MIN=150,BENCH_GHOST_MAX=450;
 // Within this far (cm, across the floor) of a camera being walked to for a capture, the UI clears away.
@@ -1172,7 +1173,7 @@ export class ScoutMain extends BaseScriptComponent {
       this.benchAim=this.benchAim?vec3.lerp(this.benchAim,spot,Math.min(1,getDeltaTime()*12)):spot;
       t.setWorldPosition(this.benchAim);
       t.setWorldRotation(quat.angleAxis(Math.atan2(-dir.x,-dir.z),vec3.up()));
-      this.showHint("Pinch the floor to set the workbench down");
+      this.showHint("Place in open space");
     }else{
       // Held: keep it standing on the floor and upright, whatever the hands did.
       const p=t.getWorldPosition();
@@ -1181,11 +1182,12 @@ export class ScoutMain extends BaseScriptComponent {
       if(Math.abs(f.y)>0.001)t.setWorldRotation(quat.angleAxis(Math.atan2(f.x,f.z),vec3.up()));
       this.benchAim=t.getWorldPosition();
     }
-    // The Place button floats above the ghost, turned to face the user.
+    // The Place button floats in front of the ghost, turned to face the user.
     if(this.benchPlaceUI&&!isNull(this.benchPlaceUI)){
       this.benchPlaceUI.enabled=this.benchHeld;
       const ut=this.benchPlaceUI.getTransform(),up=ut.getWorldPosition();
-      ut.setWorldPosition(t.getWorldPosition().add(new vec3(0,BENCH_PLACE_UI_Y,0)));
+      const front=t.getWorldRotation().multiplyVec3(vec3.forward());
+      ut.setWorldPosition(t.getWorldPosition().add(new vec3(front.x*BENCH_PLACE_UI_FRONT,BENCH_PLACE_UI_Y,front.z*BENCH_PLACE_UI_FRONT)));
       ut.setWorldRotation(quat.angleAxis(Math.atan2(head.x-up.x,head.z-up.z),vec3.up()));
     }
   }
@@ -1204,7 +1206,7 @@ export class ScoutMain extends BaseScriptComponent {
     m.rotationAxis=RotationAxis.Y;m.enableYTranslation=false;
     m.onManipulationStart.add(()=>{this.benchHeld=true;this.lastAction=getTime();});
     this.buildGhostTurnRing(g);
-    // Place button, above the ghost.
+    // Place button, in front of the ghost.
     const ui=global.scene.createSceneObject("Workbench place button");
     ui.createComponent("Component.Canvas");
     pillButton(ui,"Place workbench",vec3.zero(),44,11,170,false,()=>{this.lastAction=getTime();this.placeBench();});

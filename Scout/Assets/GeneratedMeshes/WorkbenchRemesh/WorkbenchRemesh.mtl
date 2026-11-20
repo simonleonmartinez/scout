@@ -1,3 +1,24 @@
 newmtl WorkbenchRemesh
 Kd 1 1 1
 map_Kd WorkbenchRemesh.jpg
+
+newmtl WorkbenchCinema
+Kd 1 1 1
+map_Kd WorkbenchCinema.jpg
+
+newmtl WorkbenchLens
+Kd 1 1 1
+map_Kd WorkbenchLens.jpg
+
+newmtl WorkbenchPegboard
+Kd 1 1 1
+map_Kd WorkbenchPegboard.jpg
+
+newmtl WorkbenchDrone
+Kd 1 1 1
+map_Kd WorkbenchDrone.jpg
+
+newmtl WorkbenchGimbal
+Kd 1 1 1
+map_Kd WorkbenchGimbal.jpg
+

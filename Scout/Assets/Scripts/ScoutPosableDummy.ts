@@ -47,6 +47,8 @@ export const SEATED_POSE:DummyPose={
 };
 // Purple dots marking each joint while posing (model cm; the dummy is scaled up ~5.7x in the world).
 const DOT_RADIUS=0.45;
+// Body before dots before everything else (default order 0): see the constructor.
+const BODY_RENDER_ORDER=-10,DOT_RENDER_ORDER=-5;
 const DOT_COLOR:[number,number,number,number]=[0.66,0.5,1,0.9];
 // A spot on the dummy's texture that's its dark joint colour (either way up), for the joint balls.
 const JOINT_UV=new vec2(0.0083,0.1294);
@@ -109,6 +111,11 @@ export class PosableDummy {
         if(dots)this.addDot(node,dots,j.dotAt?j.dotAt.sub(j.pivot):vec3.zero());
       }
     });
+    // Draw order: the body first, then the joint dots over it (they ignore depth, to show through the
+    // body), then everything else at the default order — so a menu or prop in front of the dummy still
+    // covers the dots. (The world occluder draws earlier at -100; hand occlusion last.)
+    for(const v of collectVisuals(this.root))v.setRenderOrder(BODY_RENDER_ORDER);
+    for(const d of this.dots)for(const v of collectVisuals(d))v.setRenderOrder(DOT_RENDER_ORDER);
     if(pose)this.applyPose(pose);
     this.update();
     this.setEditable(false);
@@ -329,7 +336,7 @@ export class PosableDummy {
     b.appendIndices(idx);
     const visual=dot.createComponent("Component.RenderMeshVisual") as RenderMeshVisual;
     visual.mesh=b.getMesh();visual.mainMaterial=material;b.updateMesh();
-    visual.setRenderOrder(50);
+    visual.setRenderOrder(DOT_RENDER_ORDER);
     this.dots.push(dot);
   }
 }

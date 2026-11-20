@@ -17,8 +17,10 @@ const DRAG=0.35,DRIFT=0.35;
 // Tumble while floating: degrees per second per cm/s of throw speed, capped.
 const SPIN_PER_SPEED=0.6,SPIN_MAX=70;
 const HANDS=["left","right"] as const;
+// A hovering item's bob: height (cm) and speed (radians per second).
+const HOVER_BOB=1.5,HOVER_RATE=2.2;
 
-type Item={so:SceneObject;vel:vec3;launch:number;spinAxis:vec3;spin:number};
+type Item={so:SceneObject;vel:vec3;launch:number;spinAxis:vec3;spin:number;hover:{base:vec3;phase:number}|null};
 type Hold={item:Item;point:()=>vec3|null;offset:vec3;path:{t:number;p:vec3}[];hand:number;interactor:Interactor|null};
 
 /** A workbench easter egg: some of the gear on the bench can be grabbed — a fist while pointing at it, or
@@ -34,7 +36,7 @@ export class ScoutThrowables {
 
   /** Makes a piece of mesh throwable. Its pivot moves to the middle of the mesh so it tumbles about its
    * own centre. Returns the new holder. */
-  add(mesh:SceneObject,parent:SceneObject):SceneObject {
+  add(mesh:SceneObject,parent:SceneObject,hover=false):SceneObject {
     const visual=mesh.getComponent("Component.RenderMeshVisual") as RenderMeshVisual;
     if(!visual)return null;
     const mt=mesh.getTransform();
@@ -53,7 +55,8 @@ export class ScoutThrowables {
     const input=holder.createComponent(Interactable.getTypeName()) as Interactable;
     input.targetingMode=3;input.enableInstantDrag=true;
     addHoverFeedback(input,pivot);
-    const item:Item={so:holder,vel:vec3.zero(),launch:0,spinAxis:vec3.up(),spin:0};
+    const item:Item={so:holder,vel:vec3.zero(),launch:0,spinAxis:vec3.up(),spin:0,
+      hover:hover?{base:ht.getLocalPosition(),phase:Math.random()*Math.PI*2}:null};
     this.items.push(item);
     const seen=()=>{this.hovered={item,time:getTime()};};
     input.onHoverEnter.add(seen);input.onHoverUpdate.add(seen);
@@ -82,6 +85,12 @@ export class ScoutThrowables {
     if(this.hold)this.follow(dt);
     for(const it of this.items){
       if(this.hold&&this.hold.item===it)continue;
+      // Hovering in place until it's first picked up: a gentle bob and a slow turn.
+      if(it.launch<=0&&it.hover){
+        const t=getTime()+it.hover.phase,tr=it.so.getTransform();
+        tr.setLocalPosition(it.hover.base.add(new vec3(0,Math.sin(t*HOVER_RATE)*HOVER_BOB,0)));
+        continue;
+      }
       if(it.launch<=0)continue;
       // Ease off toward a slow drift, then keep it: weightless, it never stops or falls.
       const speed=it.vel.length;
@@ -118,7 +127,7 @@ export class ScoutThrowables {
   private begin(item:Item,point:()=>vec3|null,hand:number,interactor:Interactor|null):void {
     const p=point();
     if(!p)return;
-    item.vel=vec3.zero();item.launch=0;item.spin=0;
+    item.vel=vec3.zero();item.launch=0;item.spin=0;item.hover=null;
     // Keep the grab point where it is on the item, so it doesn't jump to centre on the hand.
     const offset=item.so.getTransform().getWorldPosition().sub(p);
     this.hold={item,point,offset,path:[{t:getTime(),p}],hand,interactor};

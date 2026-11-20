@@ -1,24 +1,46 @@
 - !<AssetImportMetadata/612d3f23-3b84-417a-8e3c-767f06bd0aa9>
   ImportedAssetIds:
-    .hidden/WorkbenchRemesh: !<reference> 686d9c4a-a172-42f1-acf7-526aa959c550
+    .hidden/WorkbenchCinema: !<reference> 6ac3869b-00f2-49af-9d96-48ecd39ca4b6
+    .hidden/WorkbenchRemesh: !<reference> ecf848e3-be6e-4a69-9228-1805bc9e4f3a
     .hidden/white: !<reference> b640a67f-e258-474b-9754-30fdd7dfa039
     08b63e64de503fff: !<reference> 6c13f5e4-710a-46e2-aa22-da0ccfc2d935
-    25a1c0273fbda19a: !<reference> 4f9af8d6-e92c-4aca-8da4-84042b0f40cd
+    1594b2c176d07657: !<reference> f8f73352-3b1e-4f2e-b0bc-576525d54eb9
     26ba073d67b9d0dd: !<reference> 2a6699d7-fd43-42b0-86e8-7a0e8f64559f
     39a4fcb2b8913f37: !<reference> 9aad93bc-78cd-42fd-9aa3-751dc7f26ce9
-    49d707652cd51aab: !<reference> cdaf08d0-37a3-4d14-9d63-4533e19c360c
+    3c0c26099fbb5ada: !<reference> dec6ecd9-3a3a-4cbb-aa67-e52a76997642
+    5fed6533b3d639ab: !<reference> acbc2be3-4889-42e8-8c1d-2e61db70c998
+    657b490204c1762d: !<reference> 03fc89d4-421b-43b1-b33b-6709d09335b5
     77380f4b9f088bd7: !<reference> fdfa5240-3b4a-4c28-943f-9b4a98eca101
-    7b24f981a0833fe5: !<reference> 649f20f3-8be7-427a-9edf-7ca92f6e298b
+    Materials/WorkbenchCinema: !<reference> 0023f98d-a1e8-4c3b-85b3-18279be82ae0
+    Materials/WorkbenchCinema|WorkbenchCinema|GraphPassInfo: !<reference> 976a4006-face-4c80-badc-1aa3b1b1fab8
+    Materials/WorkbenchDrone: !<reference> bdb2adeb-e854-453e-8350-5c030caa1b34
+    Materials/WorkbenchDrone|WorkbenchDrone|GraphPassInfo: !<reference> 4b0a615a-1193-461b-b74f-3ffbf1f1e8ed
+    Materials/WorkbenchGimbal: !<reference> ab675bbf-086b-49be-97c9-6f2cd4a0e831
+    Materials/WorkbenchGimbal|WorkbenchGimbal|GraphPassInfo: !<reference> 779ec82e-47a9-45a6-a307-cc6d901b0122
+    Materials/WorkbenchLens: !<reference> a91ee40f-77fa-4496-a118-534087a1802d
+    Materials/WorkbenchLens|WorkbenchLens|GraphPassInfo: !<reference> 0d6aac3b-ee35-4dfa-91e7-e7f2a5baa6c9
+    Materials/WorkbenchPegboard: !<reference> 5aa883ec-cc78-4940-92d3-d684cfacb342
+    Materials/WorkbenchPegboard|WorkbenchPegboard|GraphPassInfo: !<reference> 06de312b-c225-4552-a8bd-dcabbe26b5aa
     Materials/WorkbenchRemesh: !<reference> 21d473d6-ec71-4e7e-aae3-0a8dd60d54e6
     Materials/WorkbenchRemesh|WorkbenchRemesh|GraphPassInfo: !<reference> 9ec2d61d-e539-4c94-b993-e82017bb7a49
     Meshes/Bench: !<reference> 5ba88581-9878-467c-b9b0-c0077bb5d33f
     Meshes/CinemaCamera: !<reference> 1da56e5e-3a10-430e-b391-1289da7016a9
+    Meshes/CinemaLens: !<reference> 632986cd-7a1e-4eb7-8b71-f21fdbf7e2f9
     Meshes/Drone: !<reference> 748488fe-003c-43e6-b6df-fee4456b5685
-    Meshes/PhotoCamera: !<reference> ee5f0768-a0e2-4ff7-8836-8019c5b7894f
+    Meshes/Gimbal: !<reference> ba5efb38-91d7-482f-a316-3363093b830e
+    Meshes/Pegboard: !<reference> 94b71241-a751-4c50-84db-a56d0533a557
     Scene: !<reference> e146f070-abf6-4b90-8a49-1fad9d861877
+    Textures/WorkbenchCinema: !<reference> b30332ab-fe5e-4335-9200-10804287592a
+    Textures/WorkbenchDrone: !<reference> c65b0c60-972a-43fa-8f2d-8a9f1e2468d6
+    Textures/WorkbenchGimbal: !<reference> 5c76c279-f464-4b07-9f61-0a3b842b7154
+    Textures/WorkbenchLens: !<reference> 1fb3d8ad-664a-4c1d-a436-f1388dc965e2
+    Textures/WorkbenchPegboard: !<reference> 568cf992-d6f4-4751-b667-22d24c714ca2
     Textures/WorkbenchRemesh: !<reference> 178e398d-be21-4042-9fb3-0f34ae44f920
     a6dd737e46c7e810: !<reference> 37fe11e6-6b12-4ec5-b614-c0934842bebc
+    a95c43f3bf21d2b7: !<reference> 2375654f-cf3c-4407-b3ce-15194ba3a370
+    a9fa16fb807090b8: !<reference> aeff8fd5-8df0-4ef6-a6e6-9dfe75192630
     bfce6c3e14c3e739: !<reference> dbc605f0-804a-4a84-bac1-6433d0e0a0f8
+    fa1f3f490dac69b5: !<reference> 9e5b6436-9d43-48cd-b77c-5d4ff4d91140
   ImporterName: ObjImporter
   PrimaryAsset: !<reference> e146f070-abf6-4b90-8a49-1fad9d861877
   PackageType: LegacyPackage
@@ -28,6 +50,11 @@
   AssetDataMap:
     Scene: !<own> c1c8a414-f458-4ec5-a90c-d7cb2685bb85
   DependentFiles:
+    - WorkbenchCinema.jpg
+    - WorkbenchDrone.jpg
+    - WorkbenchGimbal.jpg
+    - WorkbenchLens.jpg
+    - WorkbenchPegboard.jpg
     - WorkbenchRemesh.jpg
     - WorkbenchRemesh.mtl
   ImporterSettings: !<D3FileImporterSettingsBase>
