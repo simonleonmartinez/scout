@@ -49,6 +49,8 @@ export const SEATED_POSE:DummyPose={
 const DOT_RADIUS=0.45;
 // Body before dots before everything else (default order 0): see the constructor.
 const BODY_RENDER_ORDER=-10,DOT_RENDER_ORDER=-5;
+// The pieces a seated dummy sits on (seatBottom).
+const SEAT_PIECES=["pelvis","thighL","thighR"];
 const DOT_COLOR:[number,number,number,number]=[0.66,0.5,1,0.9];
 // A spot on the dummy's texture that's its dark joint colour (either way up), for the joint balls.
 const JOINT_UV=new vec2(0.0083,0.1294);
@@ -70,6 +72,7 @@ export class PosableDummy {
   private pieceVisuals:RenderMeshVisual[]=[];
   private grabs:SceneObject[]=[];
   private dots:SceneObject[]=[];
+  private seatVisuals:RenderMeshVisual[]=[];
   private sleeves:{builder:MeshBuilder;data:SleeveData;center:vec3;axis:vec3;node:SceneObject;angle:number}[]=[];
   private editable=true;
   private drag:Drag=null;
@@ -103,6 +106,7 @@ export class PosableDummy {
         v.meshShadowMode=MeshShadowMode.Caster;
       }
       this.visuals.push(...visuals);this.pieceVisuals.push(...visuals);
+      if(SEAT_PIECES.indexOf(j.name)>=0)this.seatVisuals.push(...visuals);
       // The joint ball belongs to the parent piece, so it stays put as a socket while the limb turns in it.
       if(j.ball&&material)this.addBall(j.parent?this.nodes[j.parent]:this.root,(j.ballAt??j.pivot).sub(parentSpec?parentSpec.pivot:vec3.zero()),j.ball,material);
       if(j.sleeve&&j.hinge&&material)this.addSleeve(j.parent?this.nodes[j.parent]:this.root,parentSpec?parentSpec.pivot:vec3.zero(),node,j.pivot,j.hinge.axis,j.sleeve,material);
@@ -138,6 +142,12 @@ export class PosableDummy {
       sl.angle=angle;
       this.bendSleeve(sl);
     }
+  }
+  /** World Y of the underside of the hips and thighs — what a seated dummy rests on. */
+  seatBottom():number {
+    let y=Infinity;
+    for(const v of this.seatVisuals)if(!isNull(v))y=Math.min(y,v.worldAabbMin().y);
+    return y;
   }
   /** World Y of the dummy's lowest point, whatever its pose. */
   bottom():number {

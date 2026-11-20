@@ -24,6 +24,7 @@ import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST,NearGrab} from "./ScoutGrabMove";
 import {ScoutRotaryDial} from "./ScoutRotaryDial";
 import {BaseHand} from "InteractionKit.lspkg/Providers/HandInputData/BaseHand";
 import {ScoutTips,ScoutToolkitCard,TourStep,IntroCard,Tip,introSeen,markIntroSeen,pillButton} from "./ScoutOnboarding";
+import {ScoutLookUpNudge,NudgeTarget} from "./ScoutLookUpNudge";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
 import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
 import {BodyKind,CameraRig,HeightSlider,LightRig,RigPrefabs,TiltRig,TiltWheel,rigHeight} from "./ScoutCameraRig";
@@ -64,6 +65,8 @@ const WorldQuery=require("LensStudio:WorldQueryModule") as WorldQueryModule;
 // How long a pinch waits (green spinner showing) for surface tracking to find the real surface under the
 // aim point before giving up — placement never falls back to a midair position.
 const PLACE_SEARCH_SECONDS=1.5;
+// With no surface found under the aim, a pinch still lands where the ray meets the floor up to this far (cm).
+const FLOOR_FALLBACK_REACH=600;
 // First-run intro, paged on the bench console before the Photo/Video buttons: what ShotScout is, when to
 // use it, why.
 const INTRO_CARDS:IntroCard[]=[
@@ -86,7 +89,7 @@ const TOUR_STEPS:TourStep[]=[
 // Lets the bench clear away first (s).
 const KIT_DELAY=0.6;
 const TIPS:{[id:string]:Tip}={
-  place:{title:"Point and pinch",body:"to drop it on the floor.",icon:requireAsset("../Icons/arrow_forward.png") as Texture},
+  place:{title:"Point and pinch",body:"to place it on the floor or any surface.",icon:requireAsset("../Icons/arrow_forward.png") as Texture},
   grab:{title:"Grab it like a real object.",body:"Close your hand to pick it up, open to put it down.",icon:requireAsset("../Icons/pan_tool.png") as Texture},
   edit:{title:"Click edit",body:"to adjust tilt, rotation, and position.",icon:requireAsset("../Icons/edit.png") as Texture},
   pose:{title:"Click edit",body:"to adjust pose.",icon:requireAsset("../Icons/edit.png") as Texture},
@@ -167,6 +170,8 @@ const HINT_ABOVE_PREVIEW=10;
 // A placement hit counts as floor within this far (cm) of the confirmed floor height.
 const FLOOR_MATCH=12;
 const SETTLE_RAY_ABOVE=20;
+// A surface at least this far above the floor (cm) is a seat for a seated subject: it sits on it by the hips.
+const SEAT_SURFACE_MIN=25;
 // Occlusion: the occluder renders first; its on/off setting is remembered per device.
 const OCCLUDER_RENDER_ORDER=-100,OCCLUSION_KEY="scout.occlusion";
 // The scanned floor is bumpy (rugs, scan noise), so at its true height it pokes through anything resting on
@@ -284,7 +289,7 @@ export class ScoutMain extends BaseScriptComponent {
   private floorSetup:ScoutFloorSetup;
   private paletteShown=true;
   private previewHitTime=-100;
-  private pending:{kind:number;ray:PointerRay;aim:vec3;started:number}=null;
+  private pending:{kind:number;ray:PointerRay;aim:vec3;started:number;wallAt:number}=null;
   private spinner:SceneObject;
   private hint:SceneObject;
   private hintText:Text;
@@ -312,6 +317,7 @@ export class ScoutMain extends BaseScriptComponent {
   private hoverSeen:{root:SceneObject;time:number}=null;
   // Each marker's floating UI pivot, turned to face the user (angle/target in radians about +Y).
   private facingUI:{root:SceneObject;pivot:SceneObject;facing:vec3;angle:number;target:number}[]=[];
+  private lookUpNudge:ScoutLookUpNudge=null;
   /** Camera props' height sliders: shown beside the prop only while it's in edit mode. */
   /** Standing dummies whose limbs can be posed (in edit mode), by marker root. */
   private dummies=new Map<SceneObject,PosableDummy>();
@@ -364,6 +370,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.buildGroundIndicator();
     this.buildPlacementFeedback();
     this.buildHoverHalo();
+    this.lookUpNudge=new ScoutLookUpNudge(this.camera);
     this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>this.confirmFloor(y));
     this.palette.onResetFloor.add(()=>this.resetFloor());
     this.setupOcclusion();this.enableHandOcclusion();
@@ -575,6 +582,26 @@ export class ScoutMain extends BaseScriptComponent {
     this.keepAboveFloor();
     this.updateHoverHalo();
     this.updateFacingUI();
+    this.updateLookUpNudge();
+  }
+  /** Cameras, lights and subjects are tall: when the user looks at one up close with its controls above
+   * the view, a small chevron nudges them to look up (ScoutLookUpNudge). */
+  private updateLookUpNudge():void {
+    const targets:NudgeTarget[]=[];
+    for(const e of this.facingUI){
+      if(isNull(e.root)||isNull(e.pivot))continue;
+      const kind=this.kinds[this.placed.indexOf(e.root)];
+      if(kind!==0&&kind!==1&&kind!==3&&kind!==4)continue;
+      // The name tag rides with the controls row, so it marks where the user needs to look.
+      const tag=findChild(e.pivot,"Marker label");
+      const ui=tag?null:worldBounds(e.pivot);
+      const controls=tag?tag.getTransform().getWorldPosition():ui?ui.min.add(ui.max).uniformScale(0.5):null;
+      if(!controls)continue;
+      const p=e.root.getTransform().getWorldPosition(),feet=this.bottomOf(e.root);
+      targets.push({body:new vec3(p.x,(feet+controls.y)/2,p.z),controls});
+    }
+    const allowed=this.shootType!==null&&!this.workbench.active&&!this.angleCapture.guiding&&!this.roomOutline.active&&!this.captureClear;
+    this.lookUpNudge.update(targets,allowed);
   }
   /** Moves a fresh marker's floating UI (name tag + badges, dials, angle monitor, note panel) under one
    * pivot that turns about the prop's vertical axis to face the user — see updateFacingUI. Each piece
@@ -709,6 +736,17 @@ export class ScoutMain extends BaseScriptComponent {
     }
   }
   /** Moves a marker vertically so its lowest point rests at `surfaceY`. */
+  /** Puts a prop down on a surface: by its lowest point, except a seated subject on something raised (a
+   * chair, a table edge), which sits on it by the hips so its legs hang down. */
+  private standOn(root:SceneObject,surfaceY:number,kind:number):void {
+    const dummy=this.dummies.get(root);
+    if(kind===4&&dummy&&this.floorY!==null&&surfaceY>this.floorY+SEAT_SURFACE_MIN){
+      const t=root.getTransform();
+      t.setWorldPosition(t.getWorldPosition().add(new vec3(0,surfaceY-dummy.seatBottom(),0)));
+      return;
+    }
+    this.liftOnto(root,surfaceY);
+  }
   private liftOnto(root:SceneObject,surfaceY:number):void {
     const t=root.getTransform();
     t.setWorldPosition(t.getWorldPosition().add(new vec3(0,surfaceY-this.bottomOf(root),0)));
@@ -738,13 +776,15 @@ export class ScoutMain extends BaseScriptComponent {
     const idx=this.placed.indexOf(root);
     if(idx<0)return;
     const kind=this.kinds[idx];
-    const p=root.getTransform().getWorldPosition(),feet=this.bottomOf(root);
+    const p=root.getTransform().getWorldPosition(),dummy=this.dummies.get(root);
+    // A seated subject is measured from its seat, so legs hanging off a table edge don't make it miss the top.
+    const feet=kind===4&&dummy?dummy.seatBottom():this.bottomOf(root);
     // Cast from just above the feet, so a table or shelf overhead isn't taken for the surface below.
     const top=new vec3(p.x,feet+SETTLE_RAY_ABOVE,p.z),bottom=new vec3(p.x,feet-400,p.z);
     const land=(y:number)=>{
       if(isNull(root)||this.placed.indexOf(root)<0)return;
       this.groundY[this.placed.indexOf(root)]=y;
-      this.liftOnto(root,y);
+      this.standOn(root,y,kind);
       if(this.editing===root)this.gizmo.update();
     };
     const fallback=()=>{
@@ -759,22 +799,28 @@ export class ScoutMain extends BaseScriptComponent {
       else fallback();
     });
   }
-  /** Resolves a queued pinch: places only where Specs actually sees floor under the aim. A flat hit at
-   * another height (a table, a seat) or no clear hit before the search window runs out cancels with a
-   * message instead of guessing — a prop dropped on the wrong surface is worse than none. */
+  /** Resolves a queued pinch: places on the first flat surface Specs finds under the aim — the floor, a
+   * seat, a table. If none turns up in time, it lands where the pointing ray meets the known floor, as long
+   * as nothing upright (a wall) is in the way. Only aiming at a wall, or up off the floor, gets a message. */
   private updatePending():void {
     const p=this.pending;
     if(!p)return;
     this.surfaceHitTest(p.ray,p.aim,point=>{
       if(this.pending!==p||!point)return;
       this.noteSurface(point.y);
-      if(this.floorY!==null&&Math.abs(point.y-this.floorY)>FLOOR_MATCH)return; // not floor: keep looking
       this.pending=null;
-      this.spawnMarker(p.kind,this.floorY!==null?new vec3(point.x,this.floorY,point.z):point);
+      this.spawnMarker(p.kind,this.landingSpot(point));
     });
     if(getTime()-p.started<PLACE_SEARCH_SECONDS)return;
     this.pending=null;
-    this.showHint(this.floorY!==null?"Make sure there's enough floor space to place it":this.floorHint(p.ray));
+    if(this.floorY!==null&&p.ray.dir.y<-0.05){
+      const t=(this.floorY-p.ray.start.y)/p.ray.dir.y;
+      if(t>0&&t<FLOOR_FALLBACK_REACH&&t<p.wallAt){
+        this.spawnMarker(p.kind,p.ray.start.add(p.ray.dir.uniformScale(t)));
+        return;
+      }
+    }
+    this.showHint(this.floorY===null?this.floorHint(p.ray):p.wallAt<Infinity?"Point at the floor or a surface":"Aim lower, at the floor or a surface");
   }
   private floorHint(ray:PointerRay):string {
     if(ray.dir.y<STEEP_POINTING)return "Step back so Specs can see the floor";
@@ -984,8 +1030,24 @@ export class ScoutMain extends BaseScriptComponent {
     // A pinch aimed at an existing prop isn't a placement on the floor behind it.
     if(this.hovered&&!isNull(this.hovered))return;
     this.lastAction=getTime();
-    // Queued, not placed: updatePending waits (spinner showing) for a real surface under the aim point.
-    this.pending={kind:this.selected,ray:this.rayFor(interactor),aim:this.positionFor(interactor),started:getTime()};
+    const ray=this.rayFor(interactor),aim=this.positionFor(interactor);
+    // The placement grid is showing on a surface Specs just saw (floor, seat, table): put it right there.
+    if(getTime()-this.previewHitTime<PREVIEW_HIT_FRESH&&this.previewPoint){
+      this.spawnMarker(this.selected,this.landingSpot(this.onPlane(ray,aim,this.previewGroundY)));
+      return;
+    }
+    // Otherwise queued: updatePending waits (spinner showing) for a surface under the aim point.
+    const p={kind:this.selected,ray,aim,started:getTime(),wallAt:Infinity};
+    this.pending=p;
+    // Note anything upright in the way (a wall), so the floor fallback won't place behind it.
+    this.hitSession?.hitTest(ray.start,ray.start.add(ray.dir.uniformScale(RAY_REACH)),hit=>{
+      if(this.pending===p&&hit&&!this.isFlat(hit))p.wallAt=hit.position.distance(ray.start);
+    });
+  }
+  /** A spot within FLOOR_MATCH of the confirmed floor lands exactly on it; anything else (a seat, a
+   * table) stays at its own height. */
+  private landingSpot(point:vec3):vec3 {
+    return this.floorY!==null&&Math.abs(point.y-this.floorY)<=FLOOR_MATCH?new vec3(point.x,this.floorY,point.z):point;
   }
   /** `position` is the point on the real surface; the marker's lowest point is stood on it. */
   /** Picks the tool used for the next pinch on the floor (an asset kind, or HAND_KIND for none). */
@@ -1008,7 +1070,7 @@ export class ScoutMain extends BaseScriptComponent {
     root.getTransform().setWorldRotation(quat.angleAxis(Math.atan2(f.x,f.z)+cameraCorrection,vec3.up()));
     // The models' pivots aren't at their feet (the Camera's mesh was centered on the floor, half buried),
     // so stand each on its actual lowest point rather than its pivot.
-    this.liftOnto(root,position.y);
+    this.standOn(root,position.y,kind);
     if(kind===1)this.tiltKeyLight(root);
     this.placeAudio.play(1);this.refresh();
     console.log("Scout placed "+label);
@@ -1691,8 +1753,10 @@ export class ScoutMain extends BaseScriptComponent {
     const idx=this.placed.indexOf(root);
     if(idx<0)return;
     this.tips.done(this.kinds[idx]===3||this.kinds[idx]===4?"pose":"edit");
-    if(this.gizmo.isEditing(root)){this.gizmo.select(null);this.editing=null;return}
+    if(this.gizmo.isEditing(root)){this.gizmo.select(null);this.editing=null;this.selectAudio.play(1);return}
     this.editing=root;
+    // The same click as delete, so toggling edit is heard even when the handles appear out of view.
+    this.selectAudio.play(1);
     // No up/down handle: everything stands on the floor (subjects included).
     const allowVertical=false;
     // The gizmo clamps the root, so translate "lowest point on the floor" into a minimum root height.

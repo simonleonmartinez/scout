@@ -1,7 +1,6 @@
 - !<AssetImportMetadata/612d3f23-3b84-417a-8e3c-767f06bd0aa9>
   ImportedAssetIds:
     .hidden/WorkbenchCinema: !<reference> 6ac3869b-00f2-49af-9d96-48ecd39ca4b6
-    .hidden/WorkbenchRemesh: !<reference> ecf848e3-be6e-4a69-9228-1805bc9e4f3a
     .hidden/white: !<reference> b640a67f-e258-474b-9754-30fdd7dfa039
     08b63e64de503fff: !<reference> 6c13f5e4-710a-46e2-aa22-da0ccfc2d935
     1594b2c176d07657: !<reference> f8f73352-3b1e-4f2e-b0bc-576525d54eb9
