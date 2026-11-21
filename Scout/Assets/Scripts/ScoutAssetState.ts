@@ -24,7 +24,9 @@ export type CameraAssetState={isoIndex:number;apertureIndex:number;shutterIndex:
   /** How far the centre column is raised, cm. */
   lift?:number;
   /** Camera tilt, degrees (up is positive). */
-  tilt?:number};
+  tilt?:number;
+  /** "tripod" (default) or "handheld" (a camera operator holds it). */
+  mount?:string};
 /** Light Asset state — brightness/CCT dial positions for one placed Light marker. Both fields drive the
  * marker's real-time LightSource (see ScoutMain.applyLightLook). */
 export type LightAssetState={intensityIndex:number;kelvinIndex:number;

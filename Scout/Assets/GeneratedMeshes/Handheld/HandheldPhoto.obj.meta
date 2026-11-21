@@ -1,0 +1,95 @@
+- !<AssetImportMetadata/c6e24679-39ab-4c24-942a-befb9d2c47ec>
+  ImportedAssetIds:
+    .hidden/HandheldPhoto: !<reference> 398bc99d-2e30-4990-9357-3b2ed5f835d0
+    .hidden/white: !<reference> 78e9f2f1-dc52-47cf-b0e0-02a00edaa8a0
+    26ba073d67b9d0dd: !<reference> 87c69284-3f3a-4b35-b886-cc06f4b643e8
+    Materials/HandheldPhoto: !<reference> c150eafc-5147-4d50-b00d-90924aeebaf6
+    Materials/HandheldPhoto|HandheldPhoto|GraphPassInfo: !<reference> 7f570ca9-c9c7-450e-8df8-2462b8faa0e8
+    Meshes/Operator: !<reference> 8b1caf1e-3ae9-49a6-b9da-48893c9c5e8f
+    Scene: !<reference> 3a737490-2d52-496e-86dd-eca8c463a885
+    Textures/HandheldPhoto: !<reference> fd3dfa7b-b620-4c11-ad47-a8887f08407d
+    c6726523684fcee1: !<reference> f359090b-5a4a-454e-b79b-afce83ba1d88
+    dd1303657365a69e: !<reference> 94208772-07dc-44ec-b93c-1f046faa71fb
+  ImporterName: ObjImporter
+  PrimaryAsset: !<reference> 3a737490-2d52-496e-86dd-eca8c463a885
+  PackageType: LegacyPackage
+  LegacyPackagePolicy: CanBeUnpackedTransparent
+  ExtraData:
+    {}
+  AssetDataMap:
+    Scene: !<own> 4292e0d0-7eb6-4c2c-b0a1-ec0b12b0c223
+  DependentFiles:
+    - HandheldPhoto.jpg
+    - HandheldPhoto.mtl
+  ImporterSettings: !<D3FileImporterSettingsBase>
+    UseLegacyImporter: false
+    WithMaterials: true
+    NamingConvention: ByCategorySanitizeV2
+    PersistentIdGenerationAlgorithm: DescriptorBasedV2
+  CompressionSettings: !<ComplexCompressionSettings>
+    Presets:
+      Performance Compression: !<PerformanceCompressionSettings>
+        Level: Medium
+        Mipmap: false
+      None Compression: !<FileCompressionSettings>
+        {}
+    ExtensionMappings:
+      jpg: Performance Compression
+      mesh: None Compression
+    Overrides:
+      {}
+- !<ObjectPrefabAssetData/4292e0d0-7eb6-4c2c-b0a1-ec0b12b0c223>
+  Prototype: !<ObjectOwner/884546cf-0bb3-49c5-986f-518e8186e4ba>
+    PackagePath: ""
+    objects:
+      - !<own> 87c69284-3f3a-4b35-4779-33f90b49bc17
+- !<SceneObject/87c69284-3f3a-4b35-4779-33f90b49bc17>
+  PrefabRemaps:
+    []
+  Name: HandheldPhoto
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    - !<own> f359090b-5a4a-454e-4864-50317c45e277
+  Components:
+    []
+- !<RenderMeshVisual/94208772-07dc-44ec-46c3-e0fb90558e04>
+  PrefabRemaps:
+    []
+  Name: component_0
+  Enabled: true
+  RenderOrder: 0
+  StretchMode: Stretch
+  VerticalAlignment: Center
+  HorizontalAlignment: Center
+  MeshShadowMode: None
+  ShadowColor: {x: 1.000000, y: 1.000000, z: 1.000000, w: 1.000000}
+  ShadowDensity: 1.000000
+  Materials:
+    - !<reference> c150eafc-5147-4d50-b00d-90924aeebaf6
+  Mesh: !<reference> 8b1caf1e-3ae9-49a6-b9da-48893c9c5e8f
+  Skin: !<reference> 00000000-0000-0000-0000-000000000000
+  BlendShapesEnabled: true
+  BlendNormals: false
+  BlendShapes:
+    {}
+- !<SceneObject/f359090b-5a4a-454e-4864-50317c45e277>
+  PrefabRemaps:
+    []
+  Name: Operator
+  Enabled: true
+  Layers: 1
+  LocalTransform: !<TransformEntity>
+    Position: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Rotation: {x: 0.000000, y: 0.000000, z: 0.000000}
+    Scale: {x: 1.000000, y: 1.000000, z: 1.000000}
+    HasSegmentScaleCompensation: false
+  Children:
+    []
+  Components:
+    - !<own> 94208772-07dc-44ec-46c3-e0fb90558e04

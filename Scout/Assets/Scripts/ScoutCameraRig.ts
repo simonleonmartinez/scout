@@ -2,7 +2,7 @@ import {BackPlate} from "UIKit.lspkg/Scripts/BackPlate";
 import {Interactable} from "InteractionKit.lspkg/Components/Interaction/Interactable/Interactable";
 import {Interactor,TargetingMode} from "InteractionKit.lspkg/Core/Interactor/Interactor";
 import {addBackPlateHover,addHoverFeedback} from "./ScoutHover";
-import {BODY_INK,child,image,panel,styleBack} from "./ScoutOnboarding";
+import {BODY_INK,child,image,panel,styleBack,text} from "./ScoutOnboarding";
 
 /** Which camera sits on the tripod: the cinema camera (video) or the vintage stills camera (photo). */
 export type BodyKind="cinema"|"photo";
@@ -11,13 +11,22 @@ const BODY_ICONS:{[k in BodyKind]:Texture}={
   cinema:requireAsset("../Icons/videocam.png") as Texture,
   photo:requireAsset("../Icons/photo_camera.png") as Texture,
 };
+/** How the camera is held: on the tripod, or handheld by a camera operator (one per body). */
+export type MountKind="tripod"|"handheld";
+export const MOUNT_KINDS:MountKind[]=["tripod","handheld"];
+// The mount buttons are worded (icons alone read ambiguously).
+const MOUNT_LABELS:{[k in MountKind]:string}={tripod:"Tripod",handheld:"Handheld"};
+/** A handheld operator's height (cm): the floating UI sits above their head. */
+const OPERATOR_HEIGHT=175;
 const HEIGHT_ICON=requireAsset("../Icons/height.png") as Texture;
 const TILT_ICON=requireAsset("../Icons/tilt.png") as Texture;
 
 /** The tripod is the original ShotScout camera's, cut into legs / centre column / pan head
  * (Assets/GeneratedMeshes/CameraRig); either body sits on the head. All in cm, column axis at the
  * origin, feet at y=0, lens along +X. */
-export type RigPrefabs={tripod:ObjectPrefab[];bodies:{[k in BodyKind]:ObjectPrefab}};
+export type RigPrefabs={tripod:ObjectPrefab[];bodies:{[k in BodyKind]:ObjectPrefab};
+  /** Camera operators holding each body (Assets/GeneratedMeshes/Handheld), feet at the origin, facing +X. */
+  handheld?:{[k in BodyKind]:ObjectPrefab}};
 
 /** How far the centre column can rise (cm). */
 export const MAX_LIFT=40;
@@ -50,27 +59,57 @@ export interface TiltRig {
   readonly tiltAngle:number;
 }
 
+/** Called whenever a built rig's height changes (cm, + is up) — for the tripod sound — or its tilt
+ * changes (degrees) — for the dial clicks. `muted` while code (not the user) sets them, e.g. a restored
+ * layout's saved tilt. */
+export const RigSounds:{onLift:((delta:number)=>void)|null;onTilt:((delta:number)=>void)|null;muted:boolean}={onLift:null,onTilt:null,muted:false};
+
 export class CameraRig implements TiltRig {
   private column:SceneObject;
   private tilt:SceneObject;
   private bodyObject:SceneObject=null;
   private liftCm=0;
+  private built=false;
   private tiltDeg=0;
   private bodyKind:BodyKind;
-  constructor(parent:SceneObject,private prefabs:RigPrefabs,body:BodyKind,lift:number,tilt=0){
+  private mountKind:MountKind="tripod";
+  private legs:SceneObject;
+  private operator:SceneObject=null;
+  constructor(private parent:SceneObject,private prefabs:RigPrefabs,body:BodyKind,lift:number,tilt=0,mount:MountKind="tripod"){
     // Legs first: the marker code measures the prop's feet from the first mesh it finds.
     const [legs,column,head]=prefabs.tripod.map(p=>p?p.instantiate(parent):null);
     if(legs)legs.name="Tripod legs";
+    this.legs=legs;
     this.column=column;
     this.tilt=global.scene.createSceneObject("Tilt");this.tilt.setParent(parent);
     if(head){head.setParent(this.tilt);head.getTransform().setLocalPosition(new vec3(0,-TILT_PIVOT,0));}
     this.setBody(body);
     this.setLift(lift);
     this.setTilt(tilt);
+    this.setMount(mount);
+    this.built=true;
   }
   get lift():number {return this.liftCm;}
   get tiltAngle():number {return this.tiltDeg;}
   get body():BodyKind {return this.bodyKind;}
+  get mount():MountKind {return this.mountKind;}
+  /** Whether handheld operators are available (their models are wired). */
+  get canHandhold():boolean {return !!this.prefabs.handheld;}
+  /** Total height (cm): the tripod and camera, or the operator. */
+  get totalHeight():number {return this.mountKind==="handheld"?OPERATOR_HEIGHT:rigHeight(this.bodyKind)+this.liftCm;}
+  /** On the tripod, or handheld: the tripod, column, head and camera hide and an operator holding the
+   * same kind of camera stands in their place (no height or tilt of its own). */
+  setMount(kind:MountKind):void {
+    if(kind==="handheld"&&!this.prefabs.handheld)kind="tripod";
+    this.mountKind=kind;
+    const tripod=kind==="tripod";
+    for(const so of [this.legs,this.column,this.tilt])if(so&&!isNull(so))so.enabled=tripod;
+    if(this.operator&&!isNull(this.operator)){this.operator.destroy();this.operator=null;}
+    if(!tripod){
+      this.operator=this.prefabs.handheld[this.bodyKind].instantiate(this.parent);
+      this.operator.name="Camera operator";
+    }
+  }
   /** The part that tilts (head + body); the tilt wheel hangs off it. */
   get tilting():SceneObject {return this.tilt;}
   /** Where this body's tilt wheel goes, in the tilting frame. */
@@ -85,10 +124,14 @@ export class CameraRig implements TiltRig {
       this.bodyObject.name="Camera body";
       this.bodyObject.getTransform().setLocalPosition(new vec3(0,-TILT_PIVOT,0));
     }
+    // A handheld operator holds the matching camera too.
+    if(this.built&&this.mountKind==="handheld")this.setMount("handheld");
   }
   /** Raises the centre column by `cm` (clamped to 0..MAX_LIFT); the head and body ride on top. */
   setLift(cm:number):void {
+    const before=this.liftCm;
     this.liftCm=Math.max(0,Math.min(MAX_LIFT,cm));
+    if(this.built&&!RigSounds.muted&&Math.abs(this.liftCm-before)>0.01)RigSounds.onLift?.(this.liftCm-before);
     const c=this.liftCm;
     if(this.column&&!isNull(this.column)){
       const s=(HEAD_BASE-COLUMN_BOTTOM+c)/(COLUMN_TOP-COLUMN_BOTTOM);
@@ -100,7 +143,9 @@ export class CameraRig implements TiltRig {
   }
   /** Tilts the camera: positive raises the lens (+X) toward up. */
   setTilt(deg:number):void {
+    const before=this.tiltDeg;
     this.tiltDeg=Math.max(-MAX_TILT,Math.min(MAX_TILT,deg));
+    if(this.built&&!RigSounds.muted&&Math.abs(this.tiltDeg-before)>0.001)RigSounds.onTilt?.(this.tiltDeg-before);
     this.tilt.getTransform().setLocalRotation(quat.angleAxis(this.tiltDeg*Math.PI/180,vec3.forward()));
   }
 }
@@ -128,6 +173,7 @@ export class LightRig implements TiltRig {
   private poleTop:SceneObject;
   private tilt:SceneObject;
   private liftCm=0;
+  private built=false;
   private tiltDeg=0;
   /** `prefabs` = [base, pole, upper pole, head]. */
   constructor(parent:SceneObject,prefabs:ObjectPrefab[],lift:number,tilt=0){
@@ -144,13 +190,16 @@ export class LightRig implements TiltRig {
     ft.setLocalRotation(undo);ft.setLocalPosition(offset);ft.setLocalScale(vec3.one().uniformScale(LIGHT_MODEL_SCALE));
     this.setLift(lift);
     this.setTilt(tilt);
+    this.built=true;
   }
   get lift():number {return this.liftCm;}
   get tiltAngle():number {return this.tiltDeg;}
   get tilting():SceneObject {return this.tilt;}
   /** Raises the pole by `cm` (clamped to 0..MAX_LIFT); the head rides on top. */
   setLift(cm:number):void {
+    const before=this.liftCm;
     this.liftCm=Math.max(0,Math.min(MAX_LIFT,cm));
+    if(this.built&&!RigSounds.muted&&Math.abs(this.liftCm-before)>0.01)RigSounds.onLift?.(this.liftCm-before);
     const c=this.liftCm;
     if(this.pole&&!isNull(this.pole)){
       const s=(LIGHT_POLE_TOP-LIGHT_POLE_BOTTOM+c)/(LIGHT_POLE_TOP-LIGHT_POLE_BOTTOM);
@@ -164,7 +213,9 @@ export class LightRig implements TiltRig {
   }
   /** Tilts the softbox: positive aims it up. */
   setTilt(deg:number):void {
+    const before=this.tiltDeg;
     this.tiltDeg=Math.max(-MAX_TILT,Math.min(MAX_TILT,deg));
+    if(this.built&&!RigSounds.muted&&Math.abs(this.tiltDeg-before)>0.001)RigSounds.onTilt?.(this.tiltDeg-before);
     this.tilt.getTransform().setLocalRotation(LIGHT_TILT_BASE.multiply(quat.angleAxis(this.tiltDeg*Math.PI/180,vec3.forward())));
   }
 }
@@ -361,6 +412,8 @@ const KNOB_HOVER_SCALE=1.3;
 // Body picker: round icon buttons stacked beside the track (local +X is away from the prop); a purple
 // ring sits behind the chosen one.
 const PICK=10,PICK_ICON=6.5,PICK_RING=1.4,PICK_X=TRACK_W/2+PICK/2+3,PICK_GAP=3;
+// Worded buttons (the mount pair): pill width and text size. Each pair sits on its own glass pill.
+const PICK_TEXT_W=26,PICK_TEXT=115,PICK_GROUP_PAD=2.2;
 
 /** Pill-shaped glass slider with a purple knob: dragging the knob up and down sets the rig's lift.
  * Above it, a Cinema / Photo picker swaps the camera body. Lives beside the prop and is only shown while
@@ -369,10 +422,12 @@ export class HeightSlider {
   readonly root:SceneObject;
   private knob:SceneObject;
   private drag:{interactor:Interactor;startY:number;startLift:number;normal:vec3;origin:vec3;direct:boolean}=null;
+  private track:SceneObject;
   constructor(parent:SceneObject,pos:vec3,private camera:Camera,private get:()=>number,private set:(cm:number)=>void,
-    private touched:()=>void,body?:BodyKind,pickBody?:(kind:BodyKind)=>void){
+    private touched:()=>void,body?:BodyKind,pickBody?:(kind:BodyKind)=>void,mount?:MountKind,pickMount?:(kind:MountKind)=>void,mountX=0){
     this.root=child(parent,"Height slider",pos);
     const track=child(this.root,"Track",vec3.zero());
+    this.track=track;
     panel(track,TRACK_W,TRACK_H,GLASS,TRACK_W/2);
     this.knob=child(this.root,"Knob",new vec3(0,0,0.6));
     const face=child(this.knob,"Face",vec3.zero());
@@ -409,9 +464,17 @@ export class HeightSlider {
     const end=()=>{if(this.drag){this.drag=null;this.touched();}};
     input.onTriggerEnd.add(end);input.onTriggerEndOutside.add(end);input.onTriggerCanceled.add(end);
     // Only cameras have more than one body to pick from.
-    if(body&&pickBody)this.buildPicker(body,pickBody);
+    if(body&&pickBody)this.buildPicker("Body picker",PICK_X,BODY_KINDS,body,pickBody,{icons:BODY_ICONS});
+    // ...and a mount: tripod or handheld, at `mountX` (the caller puts it on the prop's other side).
+    if(mount&&pickMount)this.buildPicker("Mount picker",mountX,MOUNT_KINDS,mount,
+      k=>{this.setHandheld(k==="handheld");pickMount(k);},{labels:MOUNT_LABELS});
+    if(mount)this.setHandheld(mount==="handheld");
     this.refresh();
     this.root.enabled=false;
+  }
+  /** Handheld has no column to raise: the track and knob hide, the pickers stay. */
+  setHandheld(on:boolean):void {
+    this.track.enabled=!on;this.knob.enabled=!on;
   }
   get dragging():boolean {return !!this.drag;}
   /** Moves the knob to match the current lift. */
@@ -419,15 +482,23 @@ export class HeightSlider {
     const k=this.get()/MAX_LIFT;
     this.knob.getTransform().setLocalPosition(new vec3(0,-TRAVEL/2+k*TRAVEL,0.6));
   }
-  private buildPicker(current:BodyKind,pick:(kind:BodyKind)=>void):void {
-    const column=child(this.root,"Body picker",new vec3(PICK_X,0,0));
-    const yOf=(i:number)=>((BODY_KINDS.length-1)/2-i)*(PICK+PICK_GAP);
-    const ring=child(column,"Chosen",new vec3(0,yOf(BODY_KINDS.indexOf(current)),-0.2));
-    panel(ring,PICK+2*PICK_RING,PICK+2*PICK_RING,PURPLE,PICK/2+PICK_RING);
-    BODY_KINDS.forEach((kind,i)=>{
+  /** A column of round icon buttons (or worded pills) on a glass pill of its own, with a purple ring on
+   * the chosen one. */
+  private buildPicker<K extends string>(name:string,x:number,kinds:K[],current:K,pick:(kind:K)=>void,
+    face:{icons?:{[k in K]:Texture};labels?:{[k in K]:string}}):void {
+    const column=child(this.root,name,new vec3(x,0,0));
+    const w=face.labels?PICK_TEXT_W:PICK;
+    const yOf=(i:number)=>((kinds.length-1)/2-i)*(PICK+PICK_GAP);
+    // The pair's own pill, so two pairs read as two separate choices.
+    const group=child(column,"Group",new vec3(0,0,-0.4));
+    const gh=kinds.length*PICK+(kinds.length-1)*PICK_GAP+2*PICK_GROUP_PAD;
+    panel(group,w+2*PICK_GROUP_PAD,gh,GLASS,(PICK+2*PICK_GROUP_PAD)/2);
+    const ring=child(column,"Chosen",new vec3(0,yOf(kinds.indexOf(current)),-0.2));
+    panel(ring,w+2*PICK_RING,PICK+2*PICK_RING,PURPLE,PICK/2+PICK_RING);
+    kinds.forEach((kind,i)=>{
       const so=child(column,"Button",new vec3(0,yOf(i),0.2));
       const back=so.createComponent(BackPlate.getTypeName()) as BackPlate;
-      back.style="simple";back.size=new vec2(PICK,PICK);
+      back.style="simple";back.size=new vec2(w,PICK);
       back.onInitialized.add(()=>{
         styleBack(back,QUIET,PICK/2);
         back.interactionPlane.enabled=false;
@@ -438,8 +509,8 @@ export class HeightSlider {
         });
         addBackPlateHover(back,so,QUIET);
       });
-      const glyph=child(so,"Icon",new vec3(0,0,0.4));
-      image(glyph,BODY_ICONS[kind],PICK_ICON,PICK_ICON,BODY_INK);
+      if(face.labels)text(so,face.labels[kind],new vec3(0,0,0.4),w-2,PICK-1,PICK_TEXT,BODY_INK);
+      else{const glyph=child(so,"Icon",new vec3(0,0,0.4));image(glyph,face.icons[kind],PICK_ICON,PICK_ICON,BODY_INK);}
     });
   }
   private intersection(interactor:Interactor,origin:vec3,normal:vec3):vec3 {

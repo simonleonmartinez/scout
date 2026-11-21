@@ -43,6 +43,7 @@
     dummyParts: false
     filmReelPrefab: false
     gimbalPrefab: false
+    handheldCameras: false
     lensPrefab: false
     lightPrefab: false
     lightRig: false
@@ -92,6 +93,8 @@
         []
       cameraBodies: !<reference.ObjectPrefab[]>
         []
+      handheldCameras: !<reference.ObjectPrefab[]>
+        []
       lightRig: !<reference.ObjectPrefab[]>
         []
       worldMesh: !<reference.RenderMesh> 00000000-0000-0000-0000-000000000000
@@ -127,6 +130,7 @@
     - // @input Asset.ObjectPrefab workbenchPrefab
     - '// @input Asset.ObjectPrefab[] classicRig {"hint":"Camera tripod parts: legs, column, head"}'
     - '// @input Asset.ObjectPrefab[] cameraBodies {"hint":"Camera bodies: cinema, photo"}'
+    - '// @input Asset.ObjectPrefab[] handheldCameras {"hint":"Handheld camera operators: cinema, photo"}'
     - '// @input Asset.ObjectPrefab[] lightRig {"hint":"Light stand parts: base, pole, upper pole, softbox head"}'
     - "// @input Asset.RenderMesh worldMesh {\"hint\":\"World Mesh: the real room's reconstructed surfaces, for occlusion\"}"
     - "// @input Asset.Material occluderMaterial {\"hint\":\"Occluder material: writes depth only, so real objects hide what's behind them\"}"

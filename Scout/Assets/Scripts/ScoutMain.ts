@@ -27,7 +27,7 @@ import {ScoutTips,ScoutToolkitCard,TourStep,IntroCard,Tip,introSeen,markIntroSee
 import {ScoutLookUpNudge,NudgeTarget} from "./ScoutLookUpNudge";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
 import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
-import {BodyKind,CameraRig,HeightSlider,LightRig,RigPrefabs,TiltRig,TiltWheel,rigHeight} from "./ScoutCameraRig";
+import {BodyKind,CameraRig,HeightSlider,LightRig,MountKind,RigPrefabs,TiltRig,TiltWheel,rigHeight,RigSounds} from "./ScoutCameraRig";
 
 type PointerRay={start:vec3;dir:vec3};
 /** Saved-layout format: x/z are in the user's yaw-only frame at save time (their spot on the floor and
@@ -148,6 +148,8 @@ const MODEL_HEIGHTS=[145,165,30,170,125];
 // Camera height slider, in the prop's user-facing frame: out toward the user, off to the side, and up
 // from the prop's mid-height origin so it sits around the camera body.
 const SLIDER_OUT=14,SLIDER_SIDE=30,SLIDER_Y=28;
+// The Tripod/Handheld pair mirrors the slider onto the prop's other side, this much further out (clear of the tilt wheel).
+const MOUNT_EXTRA=14;
 // Lights' sliders sit beside the pole at about the camera's slider height (~1 m), below the softbox.
 const LIGHT_SLIDER_Y=18;
 // When a moved asset settles, the downward ray starts this far above its feet (cm).
@@ -217,6 +219,20 @@ const SLOW_MOVE_SPEED=60;
 
 const SELECT=requireAsset("../GeneratedSFX/ScoutSelect.wav") as AudioTrackAsset;
 const PLACE=requireAsset("../GeneratedSFX/ScoutPlace.wav") as AudioTrackAsset;
+// Dial clicks, from a recording of a film camera's dial: single detents (two takes, alternated). Dials and
+// tilt wheels both use them; turned fast they just click a little quicker (DIAL_CLICK_GAP).
+const DIAL_CLICKS=[requireAsset("../GeneratedSFX/ScoutDialClick.wav") as AudioTrackAsset,requireAsset("../GeneratedSFX/ScoutDialClick2.wav") as AudioTrackAsset];
+// Tripod/stand height: a column sliding up into its clamp, or down. One plays per movement, after at least
+// RIG_SOUND_MIN cm one way; a movement ends after RIG_SOUND_IDLE s still.
+const RIG_TALLER=requireAsset("../GeneratedSFX/ScoutRigTaller.wav") as AudioTrackAsset;
+const RIG_SHORTER=requireAsset("../GeneratedSFX/ScoutRigShorter.wav") as AudioTrackAsset;
+const RIG_SOUND_MIN=1.5,RIG_SOUND_IDLE=0.4;
+// The camera's and light's tilt wheels turn smoothly; they click like a dial every TILT_DETENT degrees.
+const TILT_DETENT=5;
+// Clicks never come closer together than this (s), however fast a dial or wheel turns.
+const DIAL_CLICK_GAP=0.085;
+// A camera shutter, when the angle monitor takes its shot.
+const SHUTTER=requireAsset("../GeneratedSFX/ScoutShutter.wav") as AudioTrackAsset;
 
 /** Domain state + placement. SIK provides both hand and editor mouse input. */
 @component
@@ -243,6 +259,7 @@ export class ScoutMain extends BaseScriptComponent {
   @input @allowUndefined workbenchPrefab:ObjectPrefab;
   @input @hint("Camera tripod parts: legs, column, head") classicRig:ObjectPrefab[];
   @input @hint("Camera bodies: cinema, photo") cameraBodies:ObjectPrefab[];
+  @input @allowUndefined @hint("Handheld camera operators: cinema, photo") handheldCameras:ObjectPrefab[];
   @input @hint("Light stand parts: base, pole, upper pole, softbox head") lightRig:ObjectPrefab[];
   @input @allowUndefined @hint("World Mesh: the real room's reconstructed surfaces, for occlusion") worldMesh:RenderMesh;
   @input @allowUndefined @hint("Occluder material: writes depth only, so real objects hide what's behind them") occluderMaterial:Material;
@@ -279,6 +296,13 @@ export class ScoutMain extends BaseScriptComponent {
   private lastAction=-100;
   private selectAudio:AudioComponent;
   private placeAudio:AudioComponent;
+  private dialClickAudio:AudioComponent[]=[];
+  private dialClickNext=0;
+  private lastDialClick=0;
+  private rigTallerAudio:AudioComponent;
+  private rigShorterAudio:AudioComponent;
+  private liftMove={acc:0,dir:0,last:0};
+  private tiltAcc=0;
   private ready=false;
   private pinched=[false,false];
   private hitSession:HitTestSession;
@@ -325,7 +349,7 @@ export class ScoutMain extends BaseScriptComponent {
   private dummyBuiltHeight=new Map<SceneObject,number>();
   /** Where each prop was (and the floor height) when keepAboveFloor last measured it. */
   private floorSeen=new Map<SceneObject,{pos:vec3;floor:number}>();
-  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:TiltRig;wheel:TiltWheel;afterAim?:()=>void;
+  private heightSliders:{root:SceneObject;pivot:SceneObject;slider:HeightSlider;facingPivot:SceneObject;rig:TiltRig;wheel:TiltWheel;afterAim?:()=>void;handheld:()=>boolean;
     lift:()=>number;setLift:(cm:number)=>void;setTilt:(deg:number)=>void}[]=[];
   // Onboarding (the intro itself lives on the bench): one-time tips as each action becomes useful.
   private tips:ScoutTips;
@@ -347,6 +371,16 @@ export class ScoutMain extends BaseScriptComponent {
     if(!this.palette||!this.markers||!this.placementPreview||!this.camera||!this.markerMaterial){console.error("Scout: required scene references are missing");return}
     this.palette.setBadgeMaterial(this.markerMaterial);
     this.selectAudio=this.audio(SELECT);this.placeAudio=this.audio(PLACE);
+    this.dialClickAudio=DIAL_CLICKS.map(t=>this.audio(t));
+    ScoutRotaryDial.onStep=()=>this.dialClick();
+    this.rigTallerAudio=this.audio(RIG_TALLER);this.rigShorterAudio=this.audio(RIG_SHORTER);
+    RigSounds.onLift=delta=>this.liftSound(delta);
+    RigSounds.onTilt=delta=>{
+      if(Math.sign(delta)!==Math.sign(this.tiltAcc))this.tiltAcc=0;
+      this.tiltAcc+=delta;
+      const steps=Math.floor(Math.abs(this.tiltAcc)/TILT_DETENT);
+      if(steps>0){this.tiltAcc-=Math.sign(this.tiltAcc)*steps*TILT_DETENT;this.dialClick();}
+    };
     this.palette.onSelect.add(kind=>{this.selectTool(kind);this.selectAudio.play(1);});
     this.gizmo=new ScoutTransformGizmo(this.markerMaterial,this.camera,()=>{this.lastAction=getTime();});
     // Arrow moves drop props onto the surface under them; actors may have been raised with the vertical
@@ -411,6 +445,8 @@ export class ScoutMain extends BaseScriptComponent {
     this.angleCapture=new ScoutAngleCapture(this.markerMaterial,this.camera,
       ()=>this.floorY===null?this.camera.getTransform().getWorldPosition().y-150:this.floorY,
       (seconds,fn)=>{const ev=this.createEvent("DelayedCallbackEvent");ev.bind(fn);ev.reset(seconds);});
+    const shutter=this.audio(SHUTTER);
+    this.angleCapture.onCaptured=()=>shutter.play(1);
     this.layouts=new ScoutLayoutStore();
     this.palette.setLayouts(this.layouts.list());
     this.palette.onSaveLayout.add(()=>this.saveLayout());
@@ -431,6 +467,30 @@ export class ScoutMain extends BaseScriptComponent {
   }
   private schedule(seconds:number,fn:()=>void):void {
     const ev=this.createEvent("DelayedCallbackEvent");ev.bind(fn);ev.reset(seconds);
+  }
+  /** A camera or light stand changed height: the taller or shorter sound, once per movement (and again if
+   * the movement turns round). */
+  private liftSound(delta:number):void {
+    const m=this.liftMove,now=getTime();
+    if(now-m.last>RIG_SOUND_IDLE){m.acc=0;m.dir=0;}
+    m.last=now;
+    if(Math.sign(delta)!==Math.sign(m.acc))m.acc=0;
+    m.acc+=delta;
+    const dir=Math.sign(m.acc);
+    if(Math.abs(m.acc)<RIG_SOUND_MIN||dir===m.dir)return;
+    m.dir=dir;
+    const [play,stop]=dir>0?[this.rigTallerAudio,this.rigShorterAudio]:[this.rigShorterAudio,this.rigTallerAudio];
+    if(stop.isPlaying())stop.stop(false);
+    play.play(1);
+  }
+  /** One detent on a dial or tilt wheel: a single click, at most one per DIAL_CLICK_GAP, so a fast turn
+   * just clicks a little quicker. */
+  private dialClick():void {
+    const now=getTime();
+    if(now-this.lastDialClick<DIAL_CLICK_GAP)return;
+    this.lastDialClick=now;
+    this.dialClickAudio[this.dialClickNext].play(1);
+    this.dialClickNext=(this.dialClickNext+1)%this.dialClickAudio.length;
   }
   private audio(track:AudioTrackAsset):AudioComponent {
     const audio=this.sceneObject.createComponent("Component.AudioComponent") as AudioComponent;
@@ -1103,12 +1163,15 @@ export class ScoutMain extends BaseScriptComponent {
     // from it — this was shining the softbox out its back panel instead of through the diffuser.
     bulb.getTransform().setWorldRotation(quat.lookAt(tilted.uniformScale(-1),vec3.up()));
     // A light on a tilting rig: now the beam is aimed relative to the level softbox, restore its saved tilt.
-    this.heightSliders.find(h=>h.root===root)?.afterAim?.();
+    // Applying a saved tilt isn't the user turning the wheel: no clicks.
+    RigSounds.muted=true;
+    try{this.heightSliders.find(h=>h.root===root)?.afterAim?.();}finally{RigSounds.muted=false;}
   }
   /** The tripod and both bodies, or null if they aren't wired (the Camera prop then falls back to cameraPrefab). */
   private rigPrefabs():RigPrefabs {
     if(this.classicRig?.length!==3||this.cameraBodies?.length!==2)return null;
-    return {tripod:this.classicRig,bodies:{cinema:this.cameraBodies[0],photo:this.cameraBodies[1]}};
+    const handheld=this.handheldCameras?.length===2&&this.handheldCameras.every(p=>!!p)?{cinema:this.handheldCameras[0],photo:this.handheldCameras[1]}:undefined;
+    return {tripod:this.classicRig,bodies:{cinema:this.cameraBodies[0],photo:this.cameraBodies[1]},handheld};
   }
   /** A camera's body: the one it was saved with, else cinema for video shoots and photo for photo shoots. */
   private bodyFor(state:CameraAssetState):BodyKind {
@@ -1131,7 +1194,7 @@ export class ScoutMain extends BaseScriptComponent {
     // the top of the prop, and the UI and hit box follow it.
     const cam=opts.camera;
     const fit=()=>{
-      const rise=rig.lift+(cam?rigHeight(cam.body):height)-height;
+      const rise=(cam?cam.totalHeight:rig.lift+height)-height;
       if(entry&&!isNull(entry.pivot))entry.pivot.getTransform().setLocalPosition(new vec3(0,rise,0));
       // The hit box stays centred on the root; the extra below the floor is harmless.
       const shape=Shape.createBoxShape();shape.size=new vec3(70,height+2*Math.max(0,rise),70);col.shape=shape;
@@ -1150,10 +1213,17 @@ export class ScoutMain extends BaseScriptComponent {
       wheel.rebuild(this.wheelMaterial());
       this.selectAudio.play(1);
     }:undefined;
-    const slider=new HeightSlider(pivot,pos,this.camera,()=>rig.lift,apply,touched,cam?.body,pick);
+    // Cameras can also be handheld: the tripod gives way to an operator holding the camera.
+    const pickMount=cam?.canHandhold?(kind:MountKind)=>{
+      if(kind===cam.mount)return;
+      cam.setMount(kind);(state as CameraAssetState).mount=kind;fit();
+      this.selectAudio.play(1);
+    }:undefined;
+    // The Tripod/Handheld pair goes on the prop's other side (mirroring the slider), balancing the toolbar.
+    const slider=new HeightSlider(pivot,pos,this.camera,()=>rig.lift,apply,touched,cam?.body,pick,pickMount?cam.mount:undefined,pickMount,-2*SLIDER_SIDE-MOUNT_EXTRA);
     slider.root.getTransform().setLocalRotation(quat.lookAt(facing,vec3.up()));
     const afterAim=opts.savedTilt!==undefined?()=>tilt(opts.savedTilt):undefined;
-    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null,rig,wheel,afterAim,
+    this.heightSliders.push({root,pivot,slider,facingPivot:entry?entry.pivot:null,rig,wheel,afterAim,handheld:()=>cam?.mount==="handheld",
       lift:()=>rig.lift,setLift:apply,setTilt:tilt});
     apply(rig.lift);
   }
@@ -1364,7 +1434,7 @@ export class ScoutMain extends BaseScriptComponent {
     }
     if(this.gizmo.handTurnBegin(point))return {update:p=>this.gizmo.handTurnUpdate(p),end:()=>this.gizmo.handTurnEnd()};
     for(const h of this.heightSliders){
-      if(isNull(h.root)||!h.wheel.root.enabled)continue;
+      if(isNull(h.root)||!h.wheel.root.isEnabledInHierarchy)continue;
       if(h.wheel.handTurnBegin(point))return {update:p=>h.wheel.handTurnUpdate(p),end:()=>h.wheel.handTurnEnd()};
     }
     for(const h of this.heightSliders){
@@ -1462,7 +1532,8 @@ export class ScoutMain extends BaseScriptComponent {
       const show=editing||h.slider.dragging;
       if(h.slider.root.enabled!==show)h.slider.root.enabled=show;
       if(show&&h.facingPivot&&!isNull(h.facingPivot))h.pivot.getTransform().setLocalRotation(h.facingPivot.getTransform().getLocalRotation());
-      const wheel=editing||h.wheel.dragging;
+      // Handheld: no tilt wheel (the operator holds the camera).
+      const wheel=(editing||h.wheel.dragging)&&!h.handheld();
       if(h.wheel.root.enabled!==wheel)h.wheel.root.enabled=wheel;
       if(wheel){h.wheel.updateGlow();h.wheel.faceViewer(this.camera.getTransform().getWorldPosition());}
     }
@@ -1535,7 +1606,7 @@ export class ScoutMain extends BaseScriptComponent {
     if(bodyKind){
       const holder=global.scene.createSceneObject("Rig");holder.setParent(body);
       holder.getTransform().setLocalPosition(new vec3(0,-height/2,0));
-      rig=new CameraRig(holder,this.rigPrefabs(),bodyKind,cameraState.lift||0,cameraState.tilt||0);
+      rig=new CameraRig(holder,this.rigPrefabs(),bodyKind,cameraState.lift||0,cameraState.tilt||0,cameraState.mount==="handheld"?"handheld":"tripod");
       this.pivotAtFeet(root,body);
     }else if(lightState&&this.lightRig?.length===4){
       // Lights stand on a rig too: the pole rises and the softbox tilts (see ScoutCameraRig).

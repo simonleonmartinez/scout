@@ -32,6 +32,8 @@ export class ScoutAngleCapture {
   private hint:Text;
   private alignedSince:number=null;
 
+  /** Called the moment a shot is taken (for the shutter sound). */
+  onCaptured:(()=>void)|null=null;
   constructor(private material:Material,private camera:Camera,private floorY:()=>number,private schedule:(seconds:number,fn:()=>void)=>void){}
 
   /** True while walking the user to this particular camera. */
@@ -118,6 +120,7 @@ export class ScoutAngleCapture {
     rec.captured={pos:rec.root.getTransform().getWorldPosition(),dir:lensDirection(rec.root)};
     rec.stale=false;
     rec.screen.setState("captured");
+    this.onCaptured?.();
     this.hint.text="Captured";
     this.drawRing(1,FLASH);
     this.active=null;

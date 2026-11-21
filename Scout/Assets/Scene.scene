@@ -731,6 +731,9 @@
       cameraBodies: !<reference.ObjectPrefab[]>
         - !<reference> 77e13d9b-2ab7-474b-8e9e-cf08eedde933
         - !<reference> 29bee347-d5f3-4093-911d-18cdd936eb7a
+      handheldCameras: !<reference.ObjectPrefab[]>
+        - !<reference> d4ba917c-dc79-45cd-85e8-24782a03e45d
+        - !<reference> 3a737490-2d52-496e-86dd-eca8c463a885
       lightRig: !<reference.ObjectPrefab[]>
         - !<reference> 52e105b2-d54f-4bb3-9985-f6e0bf0c291f
         - !<reference> 65e67b45-77ef-487b-a649-41eb65f5a8b9

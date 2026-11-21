@@ -43,6 +43,8 @@ const RING_MESHES=new Map<string,RenderMesh>();
 export class ScoutRotaryDial {
   /** Every dial alive, for up-close fist turning (ScoutMain looks for one within reach of the hand). */
   static readonly all:ScoutRotaryDial[]=[];
+  /** Called whenever any dial clicks to a new step, with how many steps it jumped (for the click sound). */
+  static onStep:((steps:number)=>void)|null=null;
   /** A fist closing on this dial up close starts turning it; returns whether it caught. */
   handTurnBegin(point:vec3):boolean {
     if(isNull(this.root)||!this.root.isEnabledInHierarchy)return false;
@@ -66,6 +68,7 @@ export class ScoutRotaryDial {
     if(angle===null)return;
     const idx=this.indexFromAngle(angle);
     if(idx!==this.index){
+      ScoutRotaryDial.onStep?.(Math.abs(idx-this.index));
       this.index=idx;this.updateValueText();this.refreshFill();this.spinTo(idx);
       this.config.onChange(idx,this.config.steps[idx].value);
     }
@@ -137,6 +140,7 @@ export class ScoutRotaryDial {
     if(angle===null)return;
     const idx=this.indexFromAngle(angle);
     if(idx!==this.index){
+      ScoutRotaryDial.onStep?.(Math.abs(idx-this.index));
       this.index=idx;this.updateValueText();this.refreshFill();this.spinTo(idx);
       this.config.onChange(idx,this.config.steps[idx].value);
     }

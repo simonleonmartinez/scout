@@ -1,0 +1,3 @@
+newmtl HandheldCinema
+Kd 1 1 1
+map_Kd HandheldCinema.jpg
