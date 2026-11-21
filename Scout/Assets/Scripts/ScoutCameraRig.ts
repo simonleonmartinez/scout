@@ -108,6 +108,11 @@ export class CameraRig implements TiltRig {
     if(!tripod){
       this.operator=this.prefabs.handheld[this.bodyKind].instantiate(this.parent);
       this.operator.name="Camera operator";
+      // The "crew" lettering on the hoodie is a thin decal over the back with its own sharp image: drawn
+      // see-through so only the letters show.
+      const crew=findChildNamed(this.operator,"Crew");
+      const v=crew?crew.getComponent("Component.RenderMeshVisual") as RenderMeshVisual:null;
+      if(v&&v.mainMaterial){const m=v.mainMaterial.clone();m.mainPass.blendMode=BlendMode.Normal;m.mainPass.depthWrite=false;v.mainMaterial=m;}
     }
   }
   /** The part that tilts (head + body); the tilt wheel hangs off it. */
@@ -522,4 +527,15 @@ export class HeightSlider {
     if(dist<0||dist>10000)return null;
     return start.add(direction.uniformScale(dist));
   }
+}
+
+/** The first object under `root` whose name contains `name` (imported names may carry a suffix). */
+function findChildNamed(root:SceneObject,name:string):SceneObject|null {
+  for(let i=0;i<root.getChildrenCount();i++){
+    const c=root.getChild(i);
+    if(c.name.indexOf(name)>=0)return c;
+    const deeper=findChildNamed(c,name);
+    if(deeper)return deeper;
+  }
+  return null;
 }

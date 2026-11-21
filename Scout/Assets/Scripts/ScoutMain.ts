@@ -161,6 +161,8 @@ const NEAR_REACH=6;
 const GHOST_RING_RADIUS=62,GHOST_RING_WIDTH=8,GHOST_RING_HITS=32;
 // The ghost's Place button floats this far (cm) above the floor, over the bench's top shelf.
 // The Place button floats in front of the ghost at about chest height, where it's in view.
+// Seconds the Place workbench button can be out of view before the chevron points at it.
+const PLACE_NUDGE_DWELL=1;
 const BENCH_PLACE_UI_Y=105,BENCH_PLACE_UI_FRONT=BENCH_SIZE.z/2+18;
 // The bench ghost stays this far (cm) from the user: never on top of them, never across the room.
 const BENCH_GHOST_MIN=150,BENCH_GHOST_MAX=450;
@@ -661,6 +663,12 @@ export class ScoutMain extends BaseScriptComponent {
   /** Cameras, lights and subjects are tall: when the user looks at one up close with its controls above
    * the view, a small chevron nudges them to look up (ScoutLookUpNudge). */
   private updateLookUpNudge():void {
+    // While the bench ghost is being put in place, it points at the Place workbench button instead — the
+    // one thing that changes, easy to miss while looking at the ghost on the floor.
+    if(this.benchPlaceUI&&!isNull(this.benchPlaceUI)&&this.benchPlaceUI.isEnabledInHierarchy){
+      this.lookUpNudge.updateToward(this.benchPlaceUI.getTransform().getWorldPosition(),PLACE_NUDGE_DWELL);
+      return;
+    }
     const targets:NudgeTarget[]=[];
     for(const e of this.facingUI){
       if(isNull(e.root)||isNull(e.pivot))continue;

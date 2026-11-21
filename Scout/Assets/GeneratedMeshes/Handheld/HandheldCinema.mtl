@@ -1,3 +1,7 @@
 newmtl HandheldCinema
 Kd 1 1 1
 map_Kd HandheldCinema.jpg
+
+newmtl HandheldCinemaCrew
+Kd 1 1 1
+map_Kd HandheldCinemaCrew.png

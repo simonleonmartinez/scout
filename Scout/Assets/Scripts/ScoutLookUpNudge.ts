@@ -24,6 +24,8 @@ export class ScoutLookUpNudge {
   private alpha=0;
   private chevron:Image;
   private pos:vec3=null;
+  private arrow:SceneObject;
+  private angle=Math.PI/2;
 
   constructor(private camera:Camera){
     this.root=global.scene.createSceneObject("Look up nudge");
@@ -31,6 +33,7 @@ export class ScoutLookUpNudge {
     const disc=child(this.visuals,"Disc",vec3.zero());
     panel(disc,SIZE,SIZE,BACK,SIZE/2);
     const arrow=child(this.visuals,"Chevron",new vec3(0,0,0.1));
+    this.arrow=arrow;
     image(arrow,CHEVRON_ICON,CHEVRON,CHEVRON,CHEVRON_TINT);
     // The down-chevron icon, turned to point up.
     arrow.getTransform().setLocalRotation(quat.angleAxis(Math.PI,vec3.forward()));
@@ -59,15 +62,44 @@ export class ScoutLookUpNudge {
       const up=Math.atan2(l.y,-l.z);
       if(l.z<0&&up>halfV*IN_VIEW)local=l;
     }
-    this.dwell=local?this.dwell+dt:0;
-    const show=this.dwell>=DWELL_SECONDS;
+    this.present(local?Math.PI/2:null,local?Math.atan2(local.x,-local.z):0,DWELL_SECONDS);
+  }
+
+  /** Points at one spot (e.g. a button) from the edge of the view whenever it's out of view, in whatever
+   * direction it lies — below, to the side or behind. `target` null hides the chevron. */
+  updateToward(target:vec3|null,dwell:number):void {
+    let angle:number=null;
+    if(target){
+      const cam=this.camera.getTransform(),eye=cam.getWorldPosition();
+      const l=cam.getWorldRotation().invert().multiplyVec3(target.sub(eye));
+      const halfV=this.camera.fov/2,halfH=Math.atan(Math.tan(halfV)*this.camera.aspect);
+      const inView=l.z<0&&Math.abs(Math.atan2(l.y,-l.z))<halfV*IN_VIEW&&Math.abs(Math.atan2(l.x,-l.z))<halfH*IN_VIEW;
+      // Which way on screen: behind the user, the sideways part says which way to turn.
+      if(!inView)angle=Math.abs(l.x)+Math.abs(l.y)<1e-3?-Math.PI/2:Math.atan2(l.z<0?l.y:l.y*0.3,l.x);
+    }
+    this.present(angle,null,dwell);
+  }
+
+  /** Shows the chevron after `dwell` s, pointing `angle` on screen (radians from the view's right, + up),
+   * near that edge of the view; `azUp` leans the upward one toward the controls' side. */
+  private present(angle:number|null,azUp:number|null,dwell:number):void {
+    const dt=getDeltaTime();
+    const cam=this.camera.getTransform(),eye=cam.getWorldPosition(),rot=cam.getWorldRotation();
+    const halfV=this.camera.fov/2,halfH=Math.atan(Math.tan(halfV)*this.camera.aspect);
+    this.dwell=angle!==null?this.dwell+dt:0;
+    const show=this.dwell>=dwell;
     this.alpha+=((show?1:0)-this.alpha)*Math.min(1,dt*FADE);
     if(this.alpha<0.02&&!show){this.root.enabled=false;this.pos=null;return}
     this.root.enabled=true;
-    if(local){
-      // Near the top of the view, leaning toward the controls' side.
-      const el=halfV*HEIGHT_IN_VIEW;
-      const az=Math.max(-halfV*SIDE_LIMIT,Math.min(halfV*SIDE_LIMIT,Math.atan2(local.x,-local.z)));
+    if(angle!==null){
+      this.angle=angle;
+      let el:number,az:number;
+      if(azUp!==null){
+        el=halfV*HEIGHT_IN_VIEW;
+        az=Math.max(-halfV*SIDE_LIMIT,Math.min(halfV*SIDE_LIMIT,azUp));
+      }else{
+        el=Math.sin(angle)*halfV*HEIGHT_IN_VIEW;az=Math.cos(angle)*halfH*HEIGHT_IN_VIEW;
+      }
       const dir=new vec3(Math.sin(az)*Math.cos(el),Math.sin(el),-Math.cos(az)*Math.cos(el));
       const want=eye.add(rot.multiplyVec3(dir).uniformScale(DISTANCE));
       this.pos=this.pos?vec3.lerp(this.pos,want,Math.min(1,dt*10)):want;
@@ -76,8 +108,10 @@ export class ScoutLookUpNudge {
     const t=this.root.getTransform();
     t.setWorldPosition(this.pos);
     t.setWorldRotation(rot);
-    // A small upward bob, so it reads as "look up" rather than a static badge.
-    this.visuals.getTransform().setLocalPosition(new vec3(0,Math.abs(Math.sin(getTime()*BOB_RATE))*BOB,0));
+    // The down-chevron icon turned to point along `angle`, bobbing that way so it reads as "look there".
+    this.arrow.getTransform().setLocalRotation(quat.angleAxis(this.angle+Math.PI/2,vec3.forward()));
+    const bob=Math.abs(Math.sin(getTime()*BOB_RATE))*BOB;
+    this.visuals.getTransform().setLocalPosition(new vec3(Math.cos(this.angle)*bob,Math.sin(this.angle)*bob,0));
     this.visuals.getTransform().setLocalScale(vec3.one().uniformScale(0.6+0.4*this.alpha));
     this.chevron.mainPass.baseColor=new vec4(CHEVRON_TINT.x,CHEVRON_TINT.y,CHEVRON_TINT.z,this.alpha);
   }

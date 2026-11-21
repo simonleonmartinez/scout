@@ -3,13 +3,19 @@
     .hidden/HandheldPhoto: !<reference> 398bc99d-2e30-4990-9357-3b2ed5f835d0
     .hidden/white: !<reference> 78e9f2f1-dc52-47cf-b0e0-02a00edaa8a0
     26ba073d67b9d0dd: !<reference> 87c69284-3f3a-4b35-b886-cc06f4b643e8
+    65f0dc9d605192f8: !<reference> ef7905d0-b9cd-4ca7-ba6a-fb1a5a19cb52
     Materials/HandheldPhoto: !<reference> c150eafc-5147-4d50-b00d-90924aeebaf6
+    Materials/HandheldPhotoCrew: !<reference> 1fe51fa0-b6ba-4cb6-a4ca-a74abb49920e
+    Materials/HandheldPhotoCrew|HandheldPhotoCrew|GraphPassInfo: !<reference> a56823f3-e048-46d6-802b-8584a67b9153
     Materials/HandheldPhoto|HandheldPhoto|GraphPassInfo: !<reference> 7f570ca9-c9c7-450e-8df8-2462b8faa0e8
+    Meshes/Crew: !<reference> 0d055119-f3f9-4faf-839a-da8dccf65607
     Meshes/Operator: !<reference> 8b1caf1e-3ae9-49a6-b9da-48893c9c5e8f
     Scene: !<reference> 3a737490-2d52-496e-86dd-eca8c463a885
     Textures/HandheldPhoto: !<reference> fd3dfa7b-b620-4c11-ad47-a8887f08407d
+    Textures/HandheldPhotoCrew: !<reference> 361456cc-9991-4b44-b07b-15825f71e56d
     c6726523684fcee1: !<reference> f359090b-5a4a-454e-b79b-afce83ba1d88
     dd1303657365a69e: !<reference> 94208772-07dc-44ec-b93c-1f046faa71fb
+    e5450c834a1f8117: !<reference> 99800ee3-a589-400c-8791-4cdee76a426a
   ImporterName: ObjImporter
   PrimaryAsset: !<reference> 3a737490-2d52-496e-86dd-eca8c463a885
   PackageType: LegacyPackage
@@ -21,6 +27,7 @@
   DependentFiles:
     - HandheldPhoto.jpg
     - HandheldPhoto.mtl
+    - HandheldPhotoCrew.png
   ImporterSettings: !<D3FileImporterSettingsBase>
     UseLegacyImporter: false
     WithMaterials: true
@@ -30,7 +37,7 @@
     Presets:
       Performance Compression: !<PerformanceCompressionSettings>
         Level: Medium
-        Mipmap: false
+        Mipmap: true
       None Compression: !<FileCompressionSettings>
         {}
     ExtensionMappings:

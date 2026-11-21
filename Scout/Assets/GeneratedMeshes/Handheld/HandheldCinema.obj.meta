@@ -3,13 +3,19 @@
     .hidden/HandheldCinema: !<reference> 09ef600a-338d-46bf-9b74-6434e3e0f0c2
     .hidden/white: !<reference> dfc41e92-7bad-4dff-9ac1-d07ee08309e8
     26ba073d67b9d0dd: !<reference> 9aa24ea7-cc91-473c-bba6-fc303f2ee18e
+    65f0dc9d605192f8: !<reference> 83932876-c71b-4062-a8c9-7ab1864588e6
     Materials/HandheldCinema: !<reference> 5daa861a-4572-4034-8946-d5919f8116b5
+    Materials/HandheldCinemaCrew: !<reference> cf114fb6-6696-4fc6-86da-da229320868e
+    Materials/HandheldCinemaCrew|HandheldCinemaCrew|GraphPassInfo: !<reference> f458a88e-fc63-4b26-a484-d78086bc73b1
     Materials/HandheldCinema|HandheldCinema|GraphPassInfo: !<reference> 2c9b5f9d-bfce-4461-bc59-036d1a67d1c3
+    Meshes/Crew: !<reference> 44402b42-da88-4584-b1a6-3ad0332aad85
     Meshes/Operator: !<reference> 532767fb-8696-4308-b03f-a3785dc05b76
     Scene: !<reference> d4ba917c-dc79-45cd-85e8-24782a03e45d
     Textures/HandheldCinema: !<reference> 949c98c6-647b-4323-81cc-61fcfd7b8c5f
+    Textures/HandheldCinemaCrew: !<reference> 2bec2000-7f5e-4a5d-8e42-da53fa8d2437
     c6726523684fcee1: !<reference> e2179490-c7a4-4e46-a104-4efba0cd7f5c
     dd1303657365a69e: !<reference> 206dc9a4-c6bd-4372-8142-bb6895c5119d
+    e5450c834a1f8117: !<reference> 41394a77-3f3f-4573-a762-037baa80c026
   ImporterName: ObjImporter
   PrimaryAsset: !<reference> d4ba917c-dc79-45cd-85e8-24782a03e45d
   PackageType: LegacyPackage
@@ -21,6 +27,7 @@
   DependentFiles:
     - HandheldCinema.jpg
     - HandheldCinema.mtl
+    - HandheldCinemaCrew.png
   ImporterSettings: !<D3FileImporterSettingsBase>
     UseLegacyImporter: false
     WithMaterials: true
@@ -30,7 +37,7 @@
     Presets:
       Performance Compression: !<PerformanceCompressionSettings>
         Level: Medium
-        Mipmap: false
+        Mipmap: true
       None Compression: !<FileCompressionSettings>
         {}
     ExtensionMappings:
