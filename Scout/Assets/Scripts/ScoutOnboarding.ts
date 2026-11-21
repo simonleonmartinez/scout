@@ -333,3 +333,41 @@ export class ScoutToolkitCard {
     if(this.active)this.place(false);
   }
 }
+
+// Welcome: the first thing seen when the lens opens — the ShotScout wordmark over the crew artwork (the centrepiece),
+// floating a little beyond arm's reach (following the user's view lazily, level), and a "Set floor" button
+// that starts floor setup.
+const WELCOME_ART=requireAsset("../Logo/shotscout_start.png") as Texture;
+const WELCOME_LOGO=requireAsset("../Logo/shotscout_wordmark.png") as Texture;
+const WELCOME_ART_ASPECT=1008/1024,WELCOME_LOGO_ASPECT=25.4/12;
+const WELCOME_DISTANCE=100,WELCOME_DROP=6,WELCOME_FOLLOW=2.5;
+const WELCOME_ART_H=34,WELCOME_LOGO_H=5.5,WELCOME_BUTTON_W=22,WELCOME_BUTTON_H=7,WELCOME_BUTTON_TEXT=125;
+const WELCOME_FADE=0.3;
+export class ScoutWelcome {
+  readonly root:SceneObject;
+  private pressed=false;
+  private placed=false;
+  /** True once "Set floor" has been pressed (or the welcome was skipped). */
+  get done():boolean {return this.pressed;}
+  constructor(private camera:Camera,onSetFloor:()=>void){
+    this.root=global.scene.createSceneObject("Welcome");
+    // Stacked top to bottom: wordmark, artwork (centred on the card's origin), button.
+    const artY=0,logoY=WELCOME_ART_H/2+1.5+WELCOME_LOGO_H/2,buttonY=-WELCOME_ART_H/2-2-WELCOME_BUTTON_H/2;
+    image(child(this.root,"Art",new vec3(0,artY,0)),WELCOME_ART,WELCOME_ART_H*WELCOME_ART_ASPECT,WELCOME_ART_H,new vec4(1,1,1,1));
+    image(child(this.root,"Wordmark",new vec3(0,logoY,0)),WELCOME_LOGO,WELCOME_LOGO_H*WELCOME_LOGO_ASPECT,WELCOME_LOGO_H,new vec4(1,1,1,1));
+    pillButton(this.root,"Set floor",new vec3(0,buttonY,0),WELCOME_BUTTON_W,WELCOME_BUTTON_H,WELCOME_BUTTON_TEXT,false,()=>{
+      if(this.pressed)return;
+      this.pressed=true;
+      const t=this.root.getTransform();
+      animate({duration:WELCOME_FADE,easing:"ease-in-quad",update:k=>{if(!isNull(this.root))t.setLocalScale(vec3.one().uniformScale(Math.max(0.001,1-k)));},
+        ended:()=>{if(!isNull(this.root))this.root.enabled=false;}});
+      onSetFloor();
+    });
+  }
+  /** Keeps the welcome in front of the user until it's dismissed. */
+  update():void {
+    if(this.pressed)return;
+    if(!this.placed){placeInView(this.root,this.camera,WELCOME_DISTANCE,WELCOME_DROP);this.placed=true;return}
+    followView(this.root,this.camera,WELCOME_DISTANCE,WELCOME_DROP,WELCOME_FOLLOW);
+  }
+}

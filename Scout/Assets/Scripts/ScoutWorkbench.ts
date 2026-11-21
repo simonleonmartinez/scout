@@ -50,7 +50,9 @@ const KEY_Z=-CONSOLE_D/2-5;
 const LABEL_Z=BEZEL_RADIUS+5.8,LABEL_HALF_W=BEZEL_RADIUS+2.5,LABEL_HALF_D=5.3;
 // Intro pages on the panel face: text block on the left, the Next key on the right. Sizes are for
 // reading from where the user stands (~1.5m away), so they're large.
-const INTRO_TEXT_X=-10,INTRO_TEXT_W=27,NEXT_KEY_X=15.5;
+// Text block: 3 cm in from the panel's left edge, clear of the Next key; title, line and page dots grouped.
+const INTRO_TEXT_X=-8.5,INTRO_TEXT_W=25,NEXT_KEY_X=15.5;
+const INTRO_TITLE_Z=-24,INTRO_BODY_Z=-17.8,INTRO_DOTS_Z=-9;
 const INTRO_TITLE=140,INTRO_BODY=118;
 const NEXT_COLOR=new vec4(0x8a/255,0x6c/255,0xf0/255,1);
 const NEXT_ICON=requireAsset("../Icons/arrow_forward.png") as Texture;
@@ -273,11 +275,11 @@ export class ScoutWorkbench {
   private buildIntro(panel:SceneObject,intro:BenchIntro,page:number):void {
     const host=this.child(panel,"Intro");
     const card=intro.cards[page],last=page===intro.cards.length-1;
-    // The narrow panel wraps the title onto two lines: it sits at the back edge, the body under it.
-    this.flatText(host,card.title,new vec3(INTRO_TEXT_X,1.2,-CONSOLE_D+4.5),INTRO_TEXT_W,7,INTRO_TITLE,HEADER_TINT);
-    this.flatText(host,card.body,new vec3(INTRO_TEXT_X,1.2,-CONSOLE_D/2+2),INTRO_TEXT_W,11,INTRO_BODY,LABEL_INK);
+    // Title, then its line just under it, then the page dots: one group, with a margin from the edges.
+    this.flatText(host,card.title,new vec3(INTRO_TEXT_X,1.2,INTRO_TITLE_Z),INTRO_TEXT_W,5,INTRO_TITLE,HEADER_TINT);
+    this.flatText(host,card.body,new vec3(INTRO_TEXT_X,1.2,INTRO_BODY_Z),INTRO_TEXT_W,7,INTRO_BODY,LABEL_INK);
     intro.cards.forEach((_c,i)=>{
-      const dot=this.image(host,WHITE,new vec3(INTRO_TEXT_X+(i-(intro.cards.length-1)/2)*4.5,1.2,-2.2),2,2,i===page?HEADER_TINT:DOT_IDLE);
+      const dot=this.image(host,WHITE,new vec3(INTRO_TEXT_X+(i-(intro.cards.length-1)/2)*4.5,1.2,INTRO_DOTS_Z),2,2,i===page?HEADER_TINT:DOT_IDLE);
       dot.getSceneObject().getTransform().setLocalRotation(quat.angleAxis(-Math.PI/2,vec3.right()));
     });
     let pressed=false;

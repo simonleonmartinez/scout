@@ -23,8 +23,9 @@ import {ScoutAngleCapture,AngleCameraRecord} from "./ScoutAngleCapture";
 import {ScoutGrabMove,fingerCurl,PINCH_IS_FIST,NearGrab} from "./ScoutGrabMove";
 import {ScoutRotaryDial} from "./ScoutRotaryDial";
 import {BaseHand} from "InteractionKit.lspkg/Providers/HandInputData/BaseHand";
-import {ScoutTips,ScoutToolkitCard,TourStep,IntroCard,Tip,introSeen,markIntroSeen,pillButton} from "./ScoutOnboarding";
+import {ScoutTips,ScoutToolkitCard,TourStep,IntroCard,Tip,introSeen,markIntroSeen,pillButton,ScoutWelcome} from "./ScoutOnboarding";
 import {ScoutLookUpNudge,NudgeTarget} from "./ScoutLookUpNudge";
+import animate from "InteractionKit.lspkg/Utils/animate";
 import {ScoutRoomOutline} from "./ScoutRoomOutline";
 import {ScoutAnchors,AnchorFrame} from "./ScoutAnchors";
 import {BodyKind,CameraRig,HeightSlider,LightRig,MountKind,RigPrefabs,TiltRig,TiltWheel,rigHeight,RigSounds} from "./ScoutCameraRig";
@@ -70,9 +71,10 @@ const FLOOR_FALLBACK_REACH=600;
 // First-run intro, paged on the bench console before the Photo/Video buttons: what ShotScout is, when to
 // use it, why.
 const INTRO_CARDS:IntroCard[]=[
-  {title:"Plan your shoot on location.",body:"Place cameras, lights, actors and shot notes right where they'll go."},
-  {title:"Use it on a scout or the day before.",body:"Block every setup in the real space, so shoot day starts with shooting."},
-  {title:"Save it for later.",body:"Come back with your crew and your plan is waiting where you left it."},
+  // Line breaks set by hand: two balanced lines, no orphaned last word.
+  {title:"Plan in 3D",body:"Place cameras,\nlights and actors."},
+  {title:"On location",body:"Block it before\nshoot day."},
+  {title:"Save it",body:"Pick up where\nyou left off."},
 ];
 // One-time tips, each shown the first time its action becomes useful (see the tips.show calls).
 // The toolbar tour shown after the shoot type is picked on the bench: one stop per toolbar button, top
@@ -233,6 +235,10 @@ const TILT_DETENT=5;
 const DIAL_CLICK_GAP=0.085;
 // A camera shutter, when the angle monitor takes its shot.
 const SHUTTER=requireAsset("../GeneratedSFX/ScoutShutter.wav") as AudioTrackAsset;
+// Onboarding music: plays (looping) from the start screen until a shoot type is picked on the bench,
+// then fades out. Quiet, under the cues.
+const ONBOARDING_MUSIC=requireAsset("../Music/OnboardingTheme.mp3") as AudioTrackAsset;
+const MUSIC_VOLUME=0.18,MUSIC_FADE=4;
 
 /** Domain state + placement. SIK provides both hand and editor mouse input. */
 @component
@@ -296,6 +302,7 @@ export class ScoutMain extends BaseScriptComponent {
   private lastAction=-100;
   private selectAudio:AudioComponent;
   private placeAudio:AudioComponent;
+  private music:AudioComponent=null;
   private dialClickAudio:AudioComponent[]=[];
   private dialClickNext=0;
   private lastDialClick=0;
@@ -311,6 +318,8 @@ export class ScoutMain extends BaseScriptComponent {
   private floorY:number=null;
   private floorLocked=false;
   private floorSetup:ScoutFloorSetup;
+  /** The opening screen: logo and a Set floor button; floor setup waits for it. */
+  private welcome:ScoutWelcome;
   private paletteShown=true;
   private previewHitTime=-100;
   private pending:{kind:number;ray:PointerRay;aim:vec3;started:number;wallAt:number}=null;
@@ -371,6 +380,8 @@ export class ScoutMain extends BaseScriptComponent {
     if(!this.palette||!this.markers||!this.placementPreview||!this.camera||!this.markerMaterial){console.error("Scout: required scene references are missing");return}
     this.palette.setBadgeMaterial(this.markerMaterial);
     this.selectAudio=this.audio(SELECT);this.placeAudio=this.audio(PLACE);
+    this.music=this.sceneObject.createComponent("Component.AudioComponent") as AudioComponent;
+    this.music.audioTrack=ONBOARDING_MUSIC;this.music.volume=MUSIC_VOLUME;this.music.play(-1);
     this.dialClickAudio=DIAL_CLICKS.map(t=>this.audio(t));
     ScoutRotaryDial.onStep=()=>this.dialClick();
     this.rigTallerAudio=this.audio(RIG_TALLER);this.rigShorterAudio=this.audio(RIG_SHORTER);
@@ -406,6 +417,7 @@ export class ScoutMain extends BaseScriptComponent {
     this.buildHoverHalo();
     this.lookUpNudge=new ScoutLookUpNudge(this.camera);
     this.floorSetup=new ScoutFloorSetup(this.markerMaterial,this.camera,y=>this.confirmFloor(y));
+    this.welcome=new ScoutWelcome(this.camera,()=>{this.lastAction=getTime();this.selectAudio.play(1);});
     this.palette.onResetFloor.add(()=>this.resetFloor());
     this.setupOcclusion();this.enableHandOcclusion();
     this.palette.onToggleShootType.add(()=>{if(this.shootType)this.chooseShoot(this.shootType==="photo"?"video":"photo");});
@@ -610,7 +622,9 @@ export class ScoutMain extends BaseScriptComponent {
     if(this.paletteShown===hideMenu){this.paletteShown=!hideMenu;this.palette.sceneObject.enabled=!hideMenu;}
     const freshHit=getTime()-this.previewHitTime<PREVIEW_HIT_FRESH?this.previewPoint:null;
     const hand=active&&active.inputType!==InteractorInputType.Mouse?active.startPoint:null;
-    this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim,hand);
+    // The welcome comes first; floor setup starts once its Set floor button is pressed.
+    if(!this.welcome.done)this.welcome.update();
+    else this.floorSetup.update(freshHit&&this.isFloorHeight(freshHit.y)?freshHit:null,aim,hand);
     this.angleCapture.update();
     this.updateCaptureClear();
     this.roomOutline.update();
@@ -1866,10 +1880,20 @@ export class ScoutMain extends BaseScriptComponent {
     this.cameraStates=[];this.lightStates=[];this.lightRefs=[];this.noteStates=[];
     this.selectAudio.play(1);this.refresh();console.log("Scout cleared");
   }
+  /** Onboarding's over: the music fades away and stops. */
+  private fadeOutMusic():void {
+    const m=this.music;
+    if(!m||isNull(m)||!m.isPlaying())return;
+    this.music=null;
+    const from=m.volume;
+    animate({duration:MUSIC_FADE,easing:"ease-out-quad",update:k=>{if(!isNull(m))m.volume=from*(1-k);},
+      ended:()=>{if(!isNull(m))m.stop(false);}});
+  }
   /** `fromBench`: the user just picked it on the bench (not restored from a layout), so introduce the toolkit. */
   private chooseShoot(type:ShootType,fromBench=false):void {
     this.shootType=type;this.lastAction=getTime();
     this.palette.setShootType(type);this.placeAudio.play(1);
+    this.fadeOutMusic();
     // The camera ghost shows this shoot's rig.
     this.rebuildPreview();
     if(fromBench)this.schedule(KIT_DELAY,()=>this.toolkitCard.show(KIT_TITLE,TOUR_STEPS,i=>this.palette&&!isNull(this.palette.sceneObject)&&this.palette.sceneObject.enabled?this.palette.toolAnchor(i):null));
